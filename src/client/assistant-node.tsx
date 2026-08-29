@@ -1,14 +1,25 @@
-import { createElement, Fragment, useMemo, useSyncExternalStore } from "react";
+import {
+  createElement,
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react";
 import type { ReactNode } from "react";
-import { JsonBlock, MarkdownText } from "@deepseek-ai/dsh-client-ui-primitives";
+import { DisclosureRow, IconThinkOutline14, JsonBlock, MarkdownText } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { AssistantBlock } from "@deepseek-ai/dsh-client-runtime/client";
 import type { ChatNodeViewProps, RenderMessageImages } from "@deepseek-ai/dsh-client-ui-conversation/client";
 
 import { parseTaggedText, type TaggedTextSegment } from "../parser.js";
 import { TtsAudioPill, type TtsRpcClient } from "../player.js";
 
-// The small block-family presentation below follows the MIT-licensed
-// AssistantNodeView contract from the pinned DSH 0.1.1-rc.2 release. It keeps
+// The block-family presentation below adapts the MIT-licensed
+// AssistantMarkdown/ReasoningRow presentation from the pinned DSH
+// 0.1.1-rc.2 release (@deepseek-ai/dsh-client-ui-conversation). It keeps
 // markdown, reasoning, images, unknown blocks, interruption markers, and file
 // mentions intact while changing only finalized prose rendering.
 
@@ -28,6 +39,109 @@ type AssistantProps = ChatNodeViewProps<"assistant-step"> & {
 };
 
 type MarkdownCodeLabels = { copyLabel: string; copiedLabel: string };
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+function firstLine(text: string): string {
+  const newline = text.indexOf("\n");
+  return newline === -1 ? text : text.slice(0, newline);
+}
+
+function latestLine(text: string): string {
+  const visible = text.trimEnd();
+  const newline = visible.lastIndexOf("\n");
+  return newline === -1 ? visible : visible.slice(newline + 1);
+}
+
+/**
+ * Adapted from DSH's frame-throttled visual alignment helper. The synchronous
+ * fallback keeps this renderer safe in non-browser test environments.
+ */
+function useThrottledVisualUpdate(update: () => void, intervalFrames = 3): () => void {
+  const updateRef = useRef(update);
+  updateRef.current = update;
+  const pendingFrameRef = useRef<number | null>(null);
+  useIsomorphicLayoutEffect(() => () => {
+    if (pendingFrameRef.current === null || typeof cancelAnimationFrame !== "function") return;
+    cancelAnimationFrame(pendingFrameRef.current);
+    pendingFrameRef.current = null;
+  }, []);
+  return useCallback(() => {
+    if (pendingFrameRef.current !== null) return;
+    if (typeof requestAnimationFrame !== "function") {
+      updateRef.current();
+      return;
+    }
+    let remainingFrames = intervalFrames;
+    const advance = () => {
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        pendingFrameRef.current = requestAnimationFrame(advance);
+        return;
+      }
+      pendingFrameRef.current = null;
+      updateRef.current();
+    };
+    pendingFrameRef.current = requestAnimationFrame(advance);
+  }, [intervalFrames]);
+}
+
+interface ReasoningRowProps {
+  text: string;
+  running: boolean;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}
+
+/** The pinned DSH Think disclosure, kept independent from tool presentation. */
+function ReasoningRow({ text, running, t }: ReasoningRowProps): ReactNode {
+  const [expanded, setExpanded] = useState(false);
+  const summaryRef = useRef<HTMLSpanElement | null>(null);
+  const summary = running ? latestLine(text) : firstLine(text);
+  const scheduleSummaryScroll = useThrottledVisualUpdate(() => {
+    const element = summaryRef.current;
+    if (element === null) return;
+    element.scrollLeft = running ? element.scrollWidth - element.clientWidth : 0;
+  });
+  useEffect(() => {
+    scheduleSummaryScroll();
+  }, [running, scheduleSummaryScroll, summary]);
+  return createElement(
+    "div",
+    {
+      className: "kepos-tts-reasoning-root",
+      "data-variant": "think",
+      "data-state": running ? "running" : "ok"
+    },
+    running ? createElement("span", { className: "kepos-tts-visually-hidden" }, t("row.running")) : null,
+    createElement(DisclosureRow, {
+      rowClassName: "kepos-tts-reasoning-row",
+      leadingClassName: "kepos-tts-reasoning-leading",
+      titleClassName: "kepos-tts-reasoning-title",
+      chevronClassName: "kepos-tts-reasoning-chevron",
+      icon: createElement(IconThinkOutline14, { size: 14 }),
+      title: "Think",
+      open: expanded,
+      expandable: true,
+      expandOnRowClick: true,
+      onToggle: () => setExpanded((value) => !value),
+      collapsedContent: createElement(
+        Fragment,
+        null,
+        createElement("span", { className: "kepos-tts-reasoning-separator", "aria-hidden": true }),
+        createElement(
+          "span",
+          {
+            ref: summaryRef,
+            className: "kepos-tts-reasoning-summary",
+            "data-follow-end": running || undefined
+          },
+          summary
+        )
+      ),
+      children: createElement("div", { className: "kepos-tts-reasoning-body" }, text)
+    })
+  );
+}
 
 function normalText(
   segment: TaggedTextSegment,
@@ -49,7 +163,7 @@ function normalText(
 export interface RenderAssistantBlocksOptions {
   streaming: boolean;
   interrupted: boolean;
-  mentions?: unknown;
+  mentions?: unknown | undefined;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
   voiceKey?: string | undefined;
@@ -102,12 +216,12 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
       continue;
     }
     if (block.kind === "reasoning") {
-      rendered.push(createElement(
-        "details",
-        { key: index, className: "kepos-tts-reasoning", open: options.streaming && index === last },
-        createElement("summary", null, options.t("message.reasoning", { default: "Reasoning" })),
-        createElement("div", null, block.text)
-      ));
+      rendered.push(createElement(ReasoningRow, {
+        key: index,
+        text: block.text,
+        running: options.streaming && index === last,
+        t: options.t
+      }));
       continue;
     }
     if (block.kind === "image") {
@@ -136,46 +250,78 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
   return rendered;
 }
 
+interface AssistantMarkdownProps {
+  blocks: readonly AssistantBlock[];
+  streaming: boolean;
+  interrupted: boolean;
+  mentions?: unknown;
+  t: (key: string, params?: Record<string, unknown>) => string;
+  client?: TtsRpcClient | undefined;
+  voiceKey?: string | undefined;
+  renderMessageImages?: RenderMessageImages | undefined;
+}
+
+/** Pinned AssistantMarkdown root/body shape with the prose seam added. */
+function AssistantMarkdown({
+  blocks,
+  streaming,
+  interrupted,
+  mentions,
+  t,
+  client,
+  voiceKey,
+  renderMessageImages
+}: AssistantMarkdownProps): ReactNode {
+  const codeLabels = useMemo(() => ({
+    copyLabel: t("copy"),
+    copiedLabel: t("copied")
+  }), [t]);
+  if (!(streaming || interrupted || blocks.some((block) => block.kind !== "tool-call"))) return null;
+  return createElement(
+    "div",
+    { className: "kepos-tts-assistant", "data-streaming": streaming || undefined },
+    createElement(
+      "div",
+      { className: "kepos-tts-assistant-body" },
+      renderAssistantBlocks(blocks, {
+        streaming,
+        interrupted,
+        mentions,
+        t,
+        client,
+        voiceKey,
+        codeLabels,
+        renderMessageImages
+      })
+    )
+  );
+}
+
 export function TtsAssistantNodeView(props: AssistantProps) {
   const data = props.node.data;
   const source = props.voiceSource ?? EMPTY_VOICE_SOURCE;
   const voiceKey = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
-  const codeLabels = useMemo(() => ({
-    copyLabel: props.t("copy"),
-    copiedLabel: props.t("copied")
-  }), [props.t]);
   const blocks = data.blocks ?? [];
   const streaming = data.status === "running";
   const interrupted = data.status === "interrupted";
-  if (!(streaming || interrupted || blocks.some((block) => block.kind !== "tool-call"))) return null;
-  let mentions: unknown;
-  try {
+  const location = (props.node as unknown as { location?: { kind?: string; turn?: { status?: string } } }).location;
+  const turn = location?.kind === "turn" || location?.kind === "step" ? location.turn : undefined;
+  const tail = props.useTurnData?.("turn-tail");
+  const owner = useMemo(() => {
     const finalNode = data.finalNode;
-    const location = (props.node as unknown as { location?: { kind?: string; turn?: unknown } }).location;
-    const turn = location?.kind === "turn" || location?.kind === "step" ? location.turn as { status?: string } : undefined;
-    const tail = props.useTurnData?.("turn-tail");
-    if (finalNode && turn?.status === "closed" && tail?.closing?.finalNode.seq === finalNode.seq && props.fileMentions && props.openFile) {
-      mentions = props.fileMentions({
-        turn: turn as never,
-        seq: finalNode.seq,
-        openFile: props.openFile
-      } as never);
-    }
-  } catch {
-    mentions = undefined;
-  }
-  return createElement(
-    "div",
-    { className: "kepos-tts-assistant", "data-streaming": streaming || undefined },
-    ...renderAssistantBlocks(blocks, {
-      streaming,
-      interrupted,
-      mentions,
-      t: props.t as unknown as (key: string, params?: Record<string, unknown>) => string,
-      client: props.client,
-      voiceKey,
-      codeLabels,
-      renderMessageImages: props.renderMessageImages
-    })
-  );
+    if (turn?.status !== "closed" || finalNode === undefined) return undefined;
+    if (tail?.closing?.finalNode.seq !== finalNode.seq) return undefined;
+    return { turn, seq: finalNode.seq, openFile: props.openFile };
+  }, [data.finalNode, props.openFile, tail, turn]);
+  const mentions = useMemo(() => owner === undefined ? undefined : props.fileMentions(owner as never), [owner, props.fileMentions]);
+  return createElement(AssistantMarkdown, {
+    blocks,
+    streaming,
+    interrupted,
+    mentions,
+    t: props.t as unknown as (key: string, params?: Record<string, unknown>) => string,
+    client: props.client,
+    voiceKey,
+    renderMessageImages: props.renderMessageImages
+  });
 }

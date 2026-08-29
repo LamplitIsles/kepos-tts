@@ -24,7 +24,7 @@ export const inject = ["connection", "locale", "settingsScope", "slots"] as cons
 export type TtsLocaleKey =
   | "title" | "description" | "voice" | "apiKey" | "configured" | "source" | "writable"
   | "unavailable" | "save" | "remove" | "saved" | "failed" | "message.reasoning"
-  | "message.unknownBlock" | "message.stopped" | "json.truncated";
+  | "message.unknownBlock" | "message.stopped" | "json.truncated" | "row.running";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
@@ -48,7 +48,8 @@ const en: Record<TtsLocaleKey, string> = {
   "message.reasoning": "Reasoning",
   "message.unknownBlock": "Unknown message block",
   "message.stopped": "Stopped",
-  "json.truncated": "Showing {total} items"
+  "json.truncated": "Showing {total} items",
+  "row.running": "Running"
 };
 
 const zh: Record<TtsLocaleKey, string> = {
@@ -67,7 +68,8 @@ const zh: Record<TtsLocaleKey, string> = {
   "message.reasoning": "推理",
   "message.unknownBlock": "未知消息块",
   "message.stopped": "已停止",
-  "json.truncated": "显示 {total} 项"
+  "json.truncated": "显示 {total} 项",
+  "row.running": "运行中"
 };
 
 function installStyles(): () => void {

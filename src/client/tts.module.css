@@ -8,6 +8,90 @@
   gap: 10px;
 }
 
+/* Adapted from DSH 0.1.1-rc.2 AssistantMarkdown/ReasoningRow presentation. */
+.kepos-tts-assistant {
+  color: var(--dsw-alias-label-primary, #f5f5f5);
+  flex-direction: column;
+  font-size: 16px;
+  line-height: 28px;
+  display: flex;
+}
+.kepos-tts-assistant-body { flex-direction: column; gap: 16px; display: flex; }
+.kepos-tts-assistant-body .md-table-wide {
+  --dsh-table-spare: max(0px, calc((100cqw - var(--dsh-chat-content-width)) / 2));
+  --dsh-table-lead: calc(var(--dsh-table-spare) + min(var(--dsh-chat-content-width), 100cqw) - 100%);
+  box-sizing: border-box;
+  width: calc(100% + var(--dsh-table-lead) + var(--dsh-table-spare));
+  max-width: none;
+  margin-left: calc(-1 * var(--dsh-table-lead));
+  padding-left: var(--dsh-table-lead);
+}
+.kepos-tts-stopped {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.12));
+  color: var(--dsw-alias-label-tertiary, #a7a7a7);
+  border-radius: 6px;
+  align-self: flex-start;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+}
+.kepos-tts-assistant-actions { margin-top: 16px; margin-left: -6px; }
+
+.kepos-tts-visually-hidden {
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+}
+.kepos-tts-reasoning-root { flex-direction: column; display: flex; }
+.kepos-tts-reasoning-row { position: relative; overflow: hidden; }
+.kepos-tts-reasoning-root[data-state="running"] .kepos-tts-reasoning-row::after {
+  content: "";
+  inset-block: 0;
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);
+  pointer-events: none;
+  width: 300px;
+  animation: 2.6s ease-out infinite kepos-tts-reasoning-row-sweep;
+  position: absolute;
+  left: 0;
+}
+@keyframes kepos-tts-reasoning-row-sweep {
+  0% { left: -300px; }
+  90%, to { left: 100%; }
+}
+.kepos-tts-reasoning-leading { flex-shrink: 0; }
+.kepos-tts-reasoning-chevron { color: var(--dsw-alias-label-secondary); }
+.kepos-tts-reasoning-title { font-weight: 400; }
+.kepos-tts-reasoning-separator {
+  background: var(--dsw-alias-label-caption);
+  border-radius: 1px;
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+}
+.kepos-tts-reasoning-summary {
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: auto;
+  font-size: 14px;
+  line-height: 24px;
+  overflow: hidden;
+}
+.kepos-tts-reasoning-summary[data-follow-end] { text-overflow: clip; }
+.kepos-tts-reasoning-body {
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 0 4px 22px;
+  font-size: 14px;
+  line-height: 24px;
+}
+
 .kepos-tts-eyebrow { margin: 0; color: var(--dsw-alias-label-secondary, #a7a7a7); font-size: 11px; letter-spacing: .12em; }
 .kepos-tts-title { margin: 0; font-size: 17px; }
 .kepos-tts-description { margin: 0 0 6px; color: var(--dsw-alias-label-secondary, #a7a7a7); line-height: 1.45; }
@@ -39,3 +123,6 @@
 .kepos-tts-pill[data-tts-state="error"] .kepos-tts-transcript { position: static; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none; white-space: normal; }
 .kepos-tts-error { color: var(--dsw-alias-label-secondary, #a7a7a7); font-size: .8em; }
 @media (prefers-reduced-motion: reduce) { .kepos-tts-button { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .kepos-tts-reasoning-root[data-state="running"] .kepos-tts-reasoning-row::after { animation: none; }
+}

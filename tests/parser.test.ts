@@ -32,6 +32,11 @@ describe("tagged assistant text", () => {
     expect(parseTaggedText(input).passage).toBeUndefined();
   });
 
+  it("does not close an open fence when a marker has trailing text", () => {
+    const input = "```\n``` trailing text\n[[tts:text]]不要播放[[/tts:text]]\n```";
+    expect(parseTaggedText(input).passage).toBeUndefined();
+  });
+
   it("recognizes only the first valid pair; later tag syntax stays text", () => {
     const parsed = parseTaggedText("[[tts:text]]第一句[[/tts:text]] [[tts:text]]第二句[[/tts:text]]");
     expect(parsed.passage?.text).toBe("第一句");

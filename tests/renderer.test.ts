@@ -24,4 +24,18 @@ describe("assistant renderer seam", () => {
     expect(streaming).not.toContain("kepos-tts-pill");
     expect(ordinary).not.toContain("kepos-tts-pill");
   });
+
+  it("keeps the pinned Think row and native block path for untagged replies", () => {
+    const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
+      { kind: "reasoning", text: "先判断\n再回答" },
+      { kind: "text", text: "普通回复" }
+    ], { streaming: false, interrupted: false, t })));
+    expect(html).toContain('data-variant="think"');
+    expect(html).toContain('data-state="ok"');
+    expect(html).toContain("Think");
+    expect(html).toContain('data-disclosure-row="true"');
+    expect(html).toContain("先判断");
+    expect(html).toContain("普通回复");
+    expect(html).not.toContain("kepos-tts-pill");
+  });
 });
