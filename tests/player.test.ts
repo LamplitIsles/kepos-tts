@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { act, create } from "react-test-renderer";
+import { createElement } from "react";
 
-import { TtsPlayer, type AudioLike } from "../src/player.js";
+import { TtsAudioPill, TtsPlayer, type AudioLike } from "../src/player.js";
 import type { BrowserAudioPayload } from "../src/gateway.js";
 
 const payload: BrowserAudioPayload = { mediaType: "audio/mpeg", data: "SUQz", bytes: 3 };
@@ -73,5 +75,27 @@ describe("manual TTS player", () => {
     expect(player.getSnapshot().status).toBe("playing");
     expect(log[0]!.paused).toBe(0);
     player.stop();
+  });
+
+  it("keeps the transcript visible when synthesis fails", async () => {
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      root = create(createElement(TtsAudioPill, {
+        text: "你好",
+        transcript: "你好（旁白）",
+        voiceKey: "onoAnna",
+        client: { synthesize: async () => { throw new Error("unavailable"); } },
+        audioFactory: () => fakeAudio([{ made: [], played: 0, paused: 0 }])
+      }));
+    });
+    const button = root!.root.findByType("button");
+    await act(async () => {
+      button.props.onClick();
+      await Promise.resolve();
+    });
+    const pill = root!.root.findByProps({ "data-tts-state": "error" });
+    expect(pill.findByProps({ "data-tts-transcript": true }).children.join("")).toContain("你好（旁白）");
+    expect(pill.findByProps({ role: "status" }).children.join("")).toContain("Audio unavailable");
+    root!.unmount();
   });
 });

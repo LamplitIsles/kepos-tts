@@ -33,8 +33,6 @@ export interface TtsGatewayOptions {
   credentials: CredentialResolver | Pick<CredentialProvider, "resolve">;
   getVoice: () => unknown;
   fetch?: typeof fetch;
-  maxTextLength?: number;
-  maxAudioBytes?: number;
 }
 
 export class TtsGatewayError extends Error {
@@ -92,7 +90,7 @@ function base64ToBytes(value: string): Uint8Array | undefined {
   }
 }
 
-function textFromPayload(payload: unknown, maxLength: number): string {
+function textFromPayload(payload: unknown): string {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new TtsGatewayError("invalid-input");
   }
@@ -101,7 +99,7 @@ function textFromPayload(payload: unknown, maxLength: number): string {
   const text = (payload as { text?: unknown }).text;
   if (typeof text !== "string") throw new TtsGatewayError("invalid-input");
   const normalized = text.replace(/[\s\u00a0]+/gu, " ").trim();
-  if (!normalized || Array.from(normalized).length > maxLength) throw new TtsGatewayError("invalid-input");
+  if (!normalized || Array.from(normalized).length > TTS_MAX_CHARS) throw new TtsGatewayError("invalid-input");
   return normalized;
 }
 
@@ -122,19 +120,15 @@ function providerAudio(response: unknown): { data?: string; url?: string } | und
 export class QwenTtsGateway {
   private readonly fetchImpl: typeof fetch;
   private readonly endpoint: string;
-  private readonly maxTextLength: number;
-  private readonly maxAudioBytes: number;
 
   constructor(private readonly options: TtsGatewayOptions) {
     this.fetchImpl = options.fetch ?? fetch;
     this.endpoint = DASHSCOPE_ENDPOINT;
-    this.maxTextLength = options.maxTextLength ?? TTS_MAX_CHARS;
-    this.maxAudioBytes = options.maxAudioBytes ?? MAX_AUDIO_BYTES;
   }
 
   async synthesize(payload: unknown, signal?: AbortSignal): Promise<BrowserAudioPayload> {
     if (signal?.aborted) throw new TtsGatewayError("cancelled");
-    const text = textFromPayload(payload, this.maxTextLength);
+    const text = textFromPayload(payload);
     const credential = await this.options.credentials.resolve(credentialRef(CREDENTIAL_REF));
     if (!credential?.value) throw new TtsGatewayError("unavailable");
     const voice = normalizeVoice(this.options.getVoice());
@@ -190,7 +184,7 @@ export class QwenTtsGateway {
         throw new TtsGatewayError("provider-invalid-audio");
       }
     }
-    if (!bytes || bytes.length === 0 || bytes.length > this.maxAudioBytes) {
+    if (!bytes || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) {
       throw new TtsGatewayError("provider-invalid-audio");
     }
     return { mediaType: "audio/mpeg", data: bytesToBase64(bytes), bytes: bytes.length };

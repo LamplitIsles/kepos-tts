@@ -27,6 +27,11 @@ describe("tagged assistant text", () => {
     expect(parseTaggedText("[[tts:text]]未闭合").segments[0]).toEqual({ kind: "text", text: "[[tts:text]]未闭合" });
   });
 
+  it("does not close a four-backtick fence with a three-backtick run", () => {
+    const input = "````md\n[[tts:text]]不要播放[[/tts:text]]\n```";
+    expect(parseTaggedText(input).passage).toBeUndefined();
+  });
+
   it("recognizes only the first valid pair; later tag syntax stays text", () => {
     const parsed = parseTaggedText("[[tts:text]]第一句[[/tts:text]] [[tts:text]]第二句[[/tts:text]]");
     expect(parsed.passage?.text).toBe("第一句");

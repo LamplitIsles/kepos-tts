@@ -135,7 +135,12 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({}),
       locale: SETTINGS_NAMESPACE
     } as never,
-    ((props: Record<string, unknown>) => createElement(TtsSettingsCard, { ...props, scope, api: connection.api } as never)) as never
+    ((props: Record<string, unknown>) => createElement(TtsSettingsCard, {
+      ...props,
+      scope,
+      api: connection.api,
+      localOnly: connection.isLoopback
+    } as never)) as never
   ));
 
   ctx.slots.inject("conversation.chat.node", () => ctx.slots.register(

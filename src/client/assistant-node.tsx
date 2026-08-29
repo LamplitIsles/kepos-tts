@@ -22,11 +22,6 @@ const EMPTY_VOICE_SOURCE: VoiceSource = {
   subscribe: () => () => undefined
 };
 
-export interface TtsAssistantRendererOptions {
-  client: TtsRpcClient;
-  voiceSource: VoiceSource;
-}
-
 type AssistantProps = ChatNodeViewProps<"assistant-step"> & {
   client?: TtsRpcClient;
   voiceSource?: VoiceSource;

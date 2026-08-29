@@ -22,16 +22,18 @@ const CLOSE = "[[/tts:text]]";
 function fencedRanges(input: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   const marker = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$/gm;
-  let open: { token: string; start: number } | undefined;
+  let open: { character: string; length: number; start: number } | undefined;
   let match: RegExpExecArray | null;
   while ((match = marker.exec(input))) {
     const token = match[1];
     if (!token) continue;
     if (!open) {
-      open = { token: token[0]!, start: match.index };
+      open = { character: token[0]!, length: token.length, start: match.index };
       continue;
     }
-    if (open.token === token[0]) {
+    // A closing fence must use the same marker character and be at least as
+    // long as the opener. A shorter run is ordinary fenced-code content.
+    if (open.character === token[0] && token.length >= open.length) {
       ranges.push([open.start, marker.lastIndex]);
       open = undefined;
     }

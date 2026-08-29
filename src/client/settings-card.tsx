@@ -32,6 +32,8 @@ export interface CredentialApi {
 export interface TtsSettingsCardProps {
   scope: ClientSettingsScope;
   api: CredentialApi;
+  /** DSH Settings/credential writes are only permitted from loopback Web. */
+  localOnly?: boolean;
   t?: (key: string, params?: Record<string, unknown>) => string;
   labels?: Partial<{
     title: string;
@@ -105,13 +107,15 @@ export function decodeSettings(value: unknown): Partial<QwenTtsSettings> {
   return { voice: normalizeSettings(value).voice };
 }
 
-export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps) {
+export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: TtsSettingsCardProps) {
   const [snapshot, setSnapshot] = useState(scope.getSnapshot());
   const [credential, setCredential] = useState<CredentialStatus>(DEFAULT_STATUS);
   const [draftKey, setDraftKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<"saved" | "failed">();
   const voice = normalizeSettings(snapshot.value).voice;
+  const canWriteSettings = localOnly && snapshot.writable;
+  const canWrite = localOnly && credential.writable;
 
   useEffect(() => scope.subscribe(() => setSnapshot(scope.getSnapshot())), [scope]);
   useEffect(() => {
@@ -125,6 +129,7 @@ export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps)
   }, [api]);
 
   const selectVoice = async (event: { target: { value: string } }) => {
+    if (!canWriteSettings) return;
     const next = (VOICE_IDS as readonly string[]).includes(event.target.value)
       ? event.target.value as VoiceId
       : DEFAULT_VOICE;
@@ -142,7 +147,7 @@ export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps)
 
   const saveKey = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!draftKey.trim() || !credential.writable) return;
+    if (!draftKey.trim() || !canWrite) return;
     setBusy(true);
     setFeedback(undefined);
     try {
@@ -158,7 +163,7 @@ export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps)
   };
 
   const removeKey = async () => {
-    if (!credential.configured || !credential.writable) return;
+    if (!credential.configured || !canWrite) return;
     setBusy(true);
     setFeedback(undefined);
     try {
@@ -201,7 +206,7 @@ export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps)
       text.voice,
       createElement(
         "select",
-        { id: `${SETTINGS_NAMESPACE}-voice`, className: "kepos-tts-select", value: voice, onChange: selectVoice, disabled: busy || snapshot.status === "unavailable" },
+        { id: `${SETTINGS_NAMESPACE}-voice`, className: "kepos-tts-select", value: voice, onChange: selectVoice, disabled: busy || snapshot.status === "unavailable" || !canWriteSettings },
         VOICE_IDS.map((id) => createElement("option", { key: id, value: id }, VOICE_LABELS[id]))
       )
     ),
@@ -213,9 +218,9 @@ export function TtsSettingsCard({ scope, api, t, labels }: TtsSettingsCardProps)
       createElement("dt", null, text.source),
       createElement("dd", null, credential.source ?? "—"),
       createElement("dt", null, text.writable),
-      createElement("dd", { "data-writable": credential.writable ? "yes" : "no" }, credential.writable ? "yes" : "no")
+      createElement("dd", { "data-writable": canWrite ? "yes" : "no" }, canWrite ? "yes" : "no")
     ),
-    credential.writable
+    canWrite
       ? createElement(
         "form",
         { className: "kepos-tts-key-form", onSubmit: saveKey },
