@@ -1,0 +1,41 @@
+.kepos-tts-settings-card {
+  color: var(--dsw-alias-label-primary, #f5f5f5);
+  background: var(--dsw-alias-bg-module-platform, rgba(255, 255, 255, .04));
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, .12));
+  border-radius: 14px;
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.kepos-tts-eyebrow { margin: 0; color: var(--dsw-alias-label-secondary, #a7a7a7); font-size: 11px; letter-spacing: .12em; }
+.kepos-tts-title { margin: 0; font-size: 17px; }
+.kepos-tts-description { margin: 0 0 6px; color: var(--dsw-alias-label-secondary, #a7a7a7); line-height: 1.45; }
+.kepos-tts-label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.kepos-tts-select, .kepos-tts-key-input {
+  color: inherit;
+  background: var(--dsw-alias-bg-base, rgba(0, 0, 0, .22));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, .18));
+  border-radius: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+}
+.kepos-tts-select:focus-visible, .kepos-tts-key-input:focus-visible, .kepos-tts-action:focus-visible, .kepos-tts-button:focus-visible { outline: 2px solid var(--dsw-alias-label-primary-bluish, #78a9ff); outline-offset: 2px; }
+.kepos-tts-credential-status { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; margin: 4px 0; font-size: 12px; }
+.kepos-tts-credential-status dt { color: var(--dsw-alias-label-secondary, #a7a7a7); }
+.kepos-tts-credential-status dd { margin: 0; }
+.kepos-tts-key-form { display: grid; gap: 8px; }
+.kepos-tts-action { width: fit-content; border: 0; border-radius: 8px; min-height: 32px; padding: 0 12px; color: var(--dsw-alias-label-primary, #fff); background: var(--dsw-alias-button-info-fill, #4267b2); cursor: pointer; }
+.kepos-tts-action:hover:not(:disabled) { filter: brightness(1.1); }
+.kepos-tts-action:disabled { opacity: .55; cursor: not-allowed; }
+.kepos-tts-action-secondary { background: transparent; color: var(--dsw-alias-label-secondary, #a7a7a7); border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,.16)); }
+.kepos-tts-unavailable, .kepos-tts-feedback { margin: 0; color: var(--dsw-alias-label-secondary, #a7a7a7); font-size: 12px; }
+
+.kepos-tts-pill { display: inline-flex; align-items: center; gap: 7px; margin: 2px 4px; vertical-align: baseline; }
+.kepos-tts-button { border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,.2)); border-radius: 999px; padding: 2px 9px; color: inherit; background: var(--dsw-alias-bg-module-platform, rgba(255,255,255,.07)); cursor: pointer; font: inherit; font-size: .86em; }
+.kepos-tts-button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.14)); }
+.kepos-tts-button[aria-busy="true"] { cursor: wait; }
+.kepos-tts-transcript { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.kepos-tts-pill[data-tts-state="error"] .kepos-tts-transcript { position: static; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none; white-space: normal; }
+.kepos-tts-error { color: var(--dsw-alias-label-secondary, #a7a7a7); font-size: .8em; }
+@media (prefers-reduced-motion: reduce) { .kepos-tts-button { transition: none; } }
