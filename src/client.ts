@@ -106,10 +106,16 @@ export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): T
 }
 
 export function createProfileSource(scope: Pick<SettingsScope<Partial<TtsSettings>>, "getSnapshot" | "subscribe">): ProfileSource & { dispose(): void } {
-  let current = providerProfileKey(scope.getSnapshot().value);
+  const profileFromSnapshot = () => {
+    const snapshot = scope.getSnapshot();
+    return snapshot.status === "ready" && snapshot.mode === "host" && snapshot.value !== undefined
+      ? providerProfileKey(snapshot.value)
+      : undefined;
+  };
+  let current = profileFromSnapshot();
   const listeners = new Set<() => void>();
   const unsubscribe = scope.subscribe(() => {
-    const next = providerProfileKey(scope.getSnapshot().value);
+    const next = profileFromSnapshot();
     if (next === current) return;
     current = next;
     for (const listener of listeners) listener();

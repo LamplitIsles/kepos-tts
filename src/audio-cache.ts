@@ -3,9 +3,7 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import {
-  normalizeProfile
-} from "./constants.js";
+import { profileFromSettings, type TtsProfile } from "./constants.js";
 import { normalizeTtsText } from "./parser.js";
 
 /** Maximum provider payload accepted and maximum cached artifact served. */
@@ -55,17 +53,17 @@ export function audioArtifactPath(workspaceCwd: string, digest: string): string 
  */
 export function cacheDigest(
   text: string,
-  profile: unknown,
+  settings: unknown,
   formatVersion = CACHE_FORMAT_VERSION
 ): string {
-  const normalizedProfile = normalizeProfile(profile);
+  const profile: TtsProfile = profileFromSettings(settings);
   const normalized = normalizeTtsText(text);
   return createHash("sha256")
     .update(JSON.stringify([
       formatVersion,
-      normalizedProfile.provider,
-      normalizedProfile.model,
-      normalizedProfile.voice,
+      profile.provider,
+      profile.model,
+      profile.voice,
       normalized
     ]), "utf8")
     .digest("hex");

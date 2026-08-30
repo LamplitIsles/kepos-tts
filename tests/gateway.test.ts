@@ -61,6 +61,8 @@ describe("provider-neutral TTS gateway", () => {
     expect(normalizeSettings({ provider: "other", alibabaVoice: "", bytedanceVoice: "x".repeat(129) })).toEqual({ provider: "alibaba", alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     expect(providerProfileKey({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE })).not.toContain("secret");
     expect(profileFromSettings({ provider: "bytedance" })).toMatchObject({ provider: "bytedance", voice: DEFAULT_BYTEDANCE_VOICE, model: BYTEDANCE_RESOURCE_ID, credentialRef: BYTEDANCE_CREDENTIAL_REF });
+    expect(cacheDigest("固定身份", { provider: "bytedance", bytedanceVoice: "voice", model: "caller-model", resourceId: "caller-resource" }))
+      .toBe(cacheDigest("固定身份", { provider: "bytedance", bytedanceVoice: "voice" }));
   });
 
   it("sends Alibaba's configured Voice ID directly and caches normalized text", async () => {
@@ -156,15 +158,15 @@ describe("provider-neutral TTS gateway", () => {
   it("keeps provider/voice cache identities distinct and reuses workspace artifacts", async () => {
     const cwd = await workspace();
     expect(CACHE_FORMAT_VERSION).toBeGreaterThan(1);
-    expect(cacheDigest("同句", { provider: "alibaba", voice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "bytedance", voice: DEFAULT_BYTEDANCE_VOICE }));
-    expect(cacheDigest("同句", { provider: "alibaba", voice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "alibaba", voice: "Other" }));
+    expect(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "bytedance", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }));
+    expect(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Other" }));
     let calls = 0;
     const first = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; return jsonResponse({ output: { audio: { data: "SUQz" } } }); } });
     const expected = await first.synthesize({ sessionId: "session-a", text: "缓存" });
     const second = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; throw new Error("cache miss"); } });
     await expect(second.synthesize({ sessionId: "session-a", text: "缓存" })).resolves.toEqual(expected);
     expect(calls).toBe(1);
-    await expect(readFile(audioArtifactPath(cwd, cacheDigest("缓存", profileFromSettings({ provider: "alibaba" }))))) .resolves.toEqual(Buffer.from([0x49, 0x44, 0x33]));
+    await expect(readFile(audioArtifactPath(cwd, cacheDigest("缓存", { provider: "alibaba" })))).resolves.toEqual(Buffer.from([0x49, 0x44, 0x33]));
   });
 
   it("coalesces identical misses while keeping profile changes independent", async () => {

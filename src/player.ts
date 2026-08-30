@@ -19,8 +19,8 @@ export interface TtsRpcClient {
 export interface TtsAudioPlayerProps {
   text: string;
   transcript?: string;
-  /** Secret-free normalized provider profile identity from Settings. */
-  profileKey: string;
+  /** Secret-free normalized provider profile identity from a ready Host Settings snapshot. */
+  profileKey?: string | undefined;
   /** Framework-provided session identity used by the Host to resolve cwd. */
   sessionId: string;
   client: TtsRpcClient;
@@ -49,8 +49,8 @@ function cacheFor(client: TtsRpcClient): Map<string, PreparationEntry> {
   return cache;
 }
 
-function preparationKey(text: string, profileKey: string, sessionId: string): string {
-  return JSON.stringify([sessionId, profileKey, normalizeTtsText(text)]);
+function preparationKey(text: string, profileKey: string | undefined, sessionId: string): string {
+  return JSON.stringify([sessionId, profileKey ?? null, normalizeTtsText(text)]);
 }
 
 function validPayload(payload: BrowserAudioPayload): BrowserAudioPayload {
@@ -88,11 +88,11 @@ export class TtsPlayer {
     for (const listener of this.listeners) listener();
   }
 
-  hasCached(text: string, profileKey: string, sessionId: string): boolean {
+  hasCached(text: string, profileKey: string | undefined, sessionId: string): boolean {
     return this.cached?.key === preparationKey(text, profileKey, sessionId);
   }
 
-  preparedUrl(text: string, profileKey: string, sessionId: string): string | undefined {
+  preparedUrl(text: string, profileKey: string | undefined, sessionId: string): string | undefined {
     return this.hasCached(text, profileKey, sessionId) ? this.cached?.url : undefined;
   }
 
@@ -105,8 +105,8 @@ export class TtsPlayer {
   }
 
   /** Seed a remounted player from resolved page memory without publishing a new state cycle. */
-  hydrate(text: string, profileKey: string, sessionId: string): boolean {
-    if (this.disposed) return false;
+  hydrate(text: string, profileKey: string | undefined, sessionId: string): boolean {
+    if (this.disposed || profileKey === undefined) return false;
     const key = preparationKey(text, profileKey, sessionId);
     const payload = cacheFor(this.client).get(key)?.payload;
     if (!payload) return false;
@@ -116,7 +116,7 @@ export class TtsPlayer {
     return true;
   }
 
-  async prepare(text: string, profileKey: string, sessionId: string): Promise<void> {
+  async prepare(text: string, profileKey: string | undefined, sessionId: string): Promise<void> {
     if (this.disposed) return;
     const normalized = normalizeTtsText(text);
     const key = preparationKey(normalized, profileKey, sessionId);
@@ -127,8 +127,9 @@ export class TtsPlayer {
       return;
     }
 
-    const cache = cacheFor(this.client);
-    let entry = cache.get(key);
+    const shared = profileKey !== undefined;
+    const cache = shared ? cacheFor(this.client) : undefined;
+    let entry = cache?.get(key);
     if (!entry) {
       const controller = new AbortController();
       const promise = Promise.resolve()
@@ -136,15 +137,17 @@ export class TtsPlayer {
         .then(validPayload);
       const created: PreparationEntry = { promise };
       entry = created;
-      cache.set(key, created);
-      promise.then(
-        (payload) => {
-          if (cache.get(key) === created) created.payload = payload;
-        },
-        () => {
-          if (cache.get(key) === created) cache.delete(key);
-        }
-      );
+      if (cache) {
+        cache.set(key, created);
+        promise.then(
+          (payload) => {
+            if (cache.get(key) === created) created.payload = payload;
+          },
+          () => {
+            if (cache.get(key) === created) cache.delete(key);
+          }
+        );
+      }
     }
 
     this.publish({ status: "loading" });
@@ -186,7 +189,7 @@ export function TtsAudioPlayer({
     playerRef.current = player;
   }
   const player = playerRef.current;
-  const preparationRef = useRef<{ text: string; profileKey: string; sessionId: string } | null>(null);
+  const preparationRef = useRef<{ text: string; profileKey: string | undefined; sessionId: string } | null>(null);
   if (!preparationRef.current) preparationRef.current = { text, profileKey, sessionId };
   const preparation = preparationRef.current;
   const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot, player.getSnapshot);

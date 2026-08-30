@@ -109,6 +109,28 @@ describe("tagged TTS player", () => {
     remounted!.unmount();
   });
 
+  it("does not share page preparation when no ready profile exists", async () => {
+    let calls = 0;
+    const client = { synthesize: async () => { calls += 1; return payload; } };
+    clearTtsPreparationCache(client);
+    let first: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      first = create(createElement(TtsAudioPlayer, { text: "远程", sessionId: "session-a", client }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    first!.unmount();
+
+    let second: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      second = create(createElement(TtsAudioPlayer, { text: "远程", sessionId: "session-a", client }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(calls).toBe(2);
+    second!.unmount();
+  });
+
   it("removes failed preparation so a later occurrence can retry", async () => {
     let calls = 0;
     const client = {

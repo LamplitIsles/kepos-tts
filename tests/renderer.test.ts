@@ -25,6 +25,13 @@ describe("assistant renderer seam", () => {
     expect(ordinary).not.toContain("data-tts-state");
   });
 
+  it("still mounts tagged speech without a ready profile key", () => {
+    const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
+      { kind: "text", text: "[[tts:text]]远程朗读[[/tts:text]]" }
+    ], { streaming: false, interrupted: false, t, client, sessionId: "session-a" })));
+    expect(html).toContain('data-tts-state="idle"');
+  });
+
   it("keeps the pinned Think row and native block path for untagged replies", () => {
     const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
       { kind: "reasoning", text: "先判断\n再回答" },

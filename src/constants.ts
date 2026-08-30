@@ -34,8 +34,6 @@ export interface TtsProfile {
   /** Provider model/resource identity; never supplied by the browser. */
   model: string;
   credentialRef: string;
-  /** Optional explicit resource spelling accepted by cache/profile helpers. */
-  resourceId?: string;
 }
 
 export function normalizeProvider(value: unknown): TtsProvider {
@@ -70,7 +68,6 @@ export function profileFromSettings(value: unknown): TtsProfile {
       provider: "bytedance",
       voice: settings.bytedanceVoice,
       model: BYTEDANCE_RESOURCE_ID,
-      resourceId: BYTEDANCE_RESOURCE_ID,
       credentialRef: BYTEDANCE_CREDENTIAL_REF
     };
   }
@@ -84,38 +81,6 @@ export function profileFromSettings(value: unknown): TtsProfile {
 
 /** A secret-free, stable page-memory identity for one normalized profile. */
 export function providerProfileKey(value: unknown): string {
-  const profile = isProfile(value) ? normalizeProfile(value) : profileFromSettings(value);
+  const profile = profileFromSettings(value);
   return JSON.stringify([profile.provider, profile.model, profile.voice]);
 }
-
-export function normalizeProfile(value: unknown): TtsProfile {
-  if (isProfile(value)) {
-    const provider = normalizeProvider(value.provider);
-    const fallback = provider === "bytedance" ? DEFAULT_BYTEDANCE_VOICE : DEFAULT_ALIBABA_VOICE;
-    const voice = normalizeVoiceId(value.voice, fallback);
-    const suppliedModel = typeof value.model === "string" && value.model.trim() ? value.model.trim() : undefined;
-    const suppliedResource = typeof value.resourceId === "string" && value.resourceId.trim() ? value.resourceId.trim() : undefined;
-    return provider === "bytedance"
-      ? {
-        provider,
-        voice,
-        model: suppliedResource ?? suppliedModel ?? BYTEDANCE_RESOURCE_ID,
-        resourceId: suppliedResource ?? suppliedModel ?? BYTEDANCE_RESOURCE_ID,
-        credentialRef: BYTEDANCE_CREDENTIAL_REF
-      }
-      : { provider, voice, model: suppliedModel ?? ALIBABA_MODEL, credentialRef: ALIBABA_CREDENTIAL_REF };
-  }
-  return profileFromSettings(value);
-}
-
-function isProfile(value: unknown): value is { provider?: unknown; voice?: unknown; model?: unknown; resourceId?: unknown } {
-  return typeof value === "object" && value !== null && !Array.isArray(value) &&
-    "voice" in value;
-}
-
-// Descriptive aliases for the current provider-neutral contract.
-export const DASHSCOPE_CREDENTIAL_REF = ALIBABA_CREDENTIAL_REF;
-export const VOLCENGINE_CREDENTIAL_REF = BYTEDANCE_CREDENTIAL_REF;
-export const VOLCENGINE_ENDPOINT = BYTEDANCE_ENDPOINT;
-export const VOLCENGINE_RESOURCE_ID = BYTEDANCE_RESOURCE_ID;
-export const SEED_TTS_RESOURCE_ID = BYTEDANCE_RESOURCE_ID;

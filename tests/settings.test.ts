@@ -14,12 +14,12 @@ import {
 import { TtsSettingsCard, describeCredential, decodeSettings, saveCredential, type ClientSettingsScope } from "../src/client/settings-card.js";
 import type { TtsSettings } from "../src/settings.js";
 
-function snapshot(value: Partial<TtsSettings>, writable = true) {
-  return { status: "ready" as const, value, base: undefined, user: undefined, revision: 1, writable, mode: "host" as const };
+function snapshot(value: Partial<TtsSettings> | undefined, writable = true, status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
+  return { status, value, base: undefined, user: undefined, revision: 1, writable, mode };
 }
 
-function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, rejectFields = new Set<string>()) {
-  let currentSnapshot = snapshot(initial, writable);
+function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, rejectFields = new Set<string>(), status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
+  let currentSnapshot = snapshot(initial, writable, status, mode);
   const listeners = new Set<() => void>();
   const writes: Array<[string, unknown]> = [];
   const settings: ClientSettingsScope = {
@@ -104,8 +104,11 @@ describe("dual-provider native settings card", () => {
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     const input = root!.root.findByProps({ "data-settings-field": "alibaba-voice" });
     await act(async () => { input.props.onChange({ target: { value: "   " } }); });
-    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("   ");
-    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props["aria-invalid"]).toBe(true);
+    const invalidInput = root!.root.findByProps({ "data-settings-field": "alibaba-voice" });
+    expect(invalidInput.props.value).toBe("   ");
+    expect(invalidInput.props["aria-invalid"]).toBe(true);
+    expect(invalidInput.props.className).toContain("settingsInputInvalid");
+    expect(root!.root.findByProps({ id: invalidInput.props["aria-describedby"] }).props.className).toContain("settingsInvalid");
     expect(root!.root.findAllByType("button").find((button) => button.props.children === "Save")!.props.disabled).toBe(true);
     await act(async () => { input.props.onChange({ target: { value: "x".repeat(129) } }); });
     expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toHaveLength(129);
@@ -146,6 +149,63 @@ describe("dual-provider native settings card", () => {
     await act(async () => { discard.props.onClick(); });
     await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "alibaba" } }); });
     expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("host-new");
+    root!.unmount();
+  });
+
+  it("clears a provider draft when the Host catches up, then follows its next refresh", async () => {
+    const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
+    await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "bytedance" } }); });
+
+    controlled.update({ provider: "bytedance", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByType("select").props.value).toBe("bytedance");
+
+    controlled.update({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByType("select").props.value).toBe("alibaba");
+    root!.unmount();
+  });
+
+  it("clears a voice draft when the Host catches up, then follows its next refresh", async () => {
+    const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
+    await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.onChange({ target: { value: "draft" } }); });
+
+    controlled.update({ provider: "alibaba", alibabaVoice: "draft", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("draft");
+
+    controlled.update({ provider: "alibaba", alibabaVoice: "host-after", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("host-after");
+    root!.unmount();
+  });
+
+  it.each([
+    ["unavailable", "host"],
+    ["ready", "memory"]
+  ] as const)("hides the settings card for %s/%s snapshots", (status, mode) => {
+    const html = renderToStaticMarkup(createElement(TtsSettingsCard, {
+      scope: controlledScope(undefined, false, new Set(), status, mode).settings,
+      api: apiFor()
+    }));
+    expect(html).toBe("");
+  });
+
+  it("shows ready non-writable settings without allowing writes", async () => {
+    const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia" }, false);
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
+    expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("read-only");
+    expect(root!.root.findByType("select").props.disabled).toBe(true);
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.disabled).toBe(true);
+    expect(root!.root.findByProps({ type: "password" }).props.disabled).toBe(true);
     root!.unmount();
   });
 

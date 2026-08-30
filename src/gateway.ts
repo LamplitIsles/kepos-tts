@@ -8,7 +8,6 @@ import {
   BYTEDANCE_RESOURCE_ID,
   DASHSCOPE_ENDPOINT,
   TTS_MAX_CHARS,
-  normalizeProfile,
   profileFromSettings,
   type TtsProfile
 } from "./constants.js";
@@ -70,9 +69,7 @@ export interface TtsGatewayOptions {
   credentials: CredentialResolver | Pick<CredentialProvider, "resolve">;
   sessions: SessionResolver;
   /** Normalized settings are resolved for each admitted cache miss. */
-  getSettings?: () => unknown;
-  /** A host may provide the already normalized profile directly. */
-  getProfile?: () => unknown;
+  getSettings: () => unknown;
   fetch?: typeof fetch;
 }
 
@@ -395,11 +392,6 @@ export class TtsGateway {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private profile(): TtsProfile {
-    if (this.options.getProfile) return normalizeProfile(this.options.getProfile());
-    return profileFromSettings(this.options.getSettings?.());
-  }
-
   private async generateAndCache(path: string, text: string, profile: TtsProfile): Promise<number> {
     // This disk check wins a race with another process that published the same
     // deterministic artifact while this request was being scheduled.
@@ -434,10 +426,11 @@ export class TtsGateway {
   async synthesize(payload: unknown, signal?: AbortSignal): Promise<BrowserAudioPayload> {
     if (signal?.aborted) throw new TtsGatewayError("cancelled");
     const request = requestFromPayload(payload);
-    const profile = this.profile();
+    const settings = this.options.getSettings();
+    const profile = profileFromSettings(settings);
     const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
     if (!workspace) throw new TtsGatewayError("unavailable");
-    const digest = cacheDigest(request.text, profile, CACHE_FORMAT_VERSION);
+    const digest = cacheDigest(request.text, settings, CACHE_FORMAT_VERSION);
     const path = audioArtifactPath(workspace, digest);
     // The provider request intentionally does not receive the browser signal:
     // once admitted, generation must finish so another occurrence can reuse it.

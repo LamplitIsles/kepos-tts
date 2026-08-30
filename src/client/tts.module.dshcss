@@ -72,7 +72,9 @@
 .settingsSelect:focus-visible { border-color: var(--dsw-alias-brand-primary); outline: none; }
 .settingsInput:disabled,
 .settingsSelect:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.settingsInputInvalid { border-color: var(--dsw-alias-label-error); }
 .settingsHint { color: var(--dsw-alias-label-tertiary); margin: 0; font-size: 12px; line-height: 1.5; }
+.settingsInvalid { color: var(--dsw-alias-label-error); }
 .settingsFooter { border-top: 1px solid var(--dsw-alias-border-l2); justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 0 4px; display: flex; }
 .settingsFailed { min-width: 0; color: var(--dsw-alias-label-error); flex: 1; margin: 0; font-size: 12px; line-height: 1.5; }
 .settingsDiscard,

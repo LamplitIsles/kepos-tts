@@ -164,13 +164,29 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
 
   useEffect(() => scope.subscribe(() => {
     const next = scope.getSnapshot();
+    const nextBaseline = normalizeSettings(next.value);
     setSnapshot(next);
-    // Always advance the saved baseline. Drafts intentionally live in their
-    // own maps, so refreshes and revision recovery cannot erase them.
-    setBaseline(normalizeSettings(next.value));
+    // Always advance the saved baseline. A draft that now equals the Host
+    // value is no longer dirty; clearing it here lets a later Host refresh
+    // flow through instead of leaving the input stuck on stale local state.
+    setBaseline(nextBaseline);
+    setDraftProvider((current) => current === nextBaseline.provider ? undefined : current);
+    setDraftVoices((current) => {
+      const nextDrafts: Partial<Record<TtsProvider, string>> = {};
+      for (const provider of TTS_PROVIDERS) {
+        const draft = current[provider];
+        if (draft === undefined) continue;
+        const fallback = defaultVoiceFor(provider);
+        const field = voiceFieldFor(provider);
+        const valid = validateVoiceDraft(draft, fallback) === undefined;
+        if (!valid || normalizeVoiceId(draft, fallback) !== nextBaseline[field]) nextDrafts[provider] = draft;
+      }
+      return nextDrafts;
+    });
   }), [scope]);
 
   useEffect(() => {
+    if (snapshot.status !== "ready" || snapshot.mode !== "host") return;
     let active = true;
     void Promise.all(TTS_PROVIDERS.map(async (provider) => [provider, await describeCredential(api, credentialRefFor(provider))] as const))
       .then((entries) => {
@@ -184,7 +200,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, snapshot.mode, snapshot.status]);
 
   const selectedProvider = draftProvider ?? baseline.provider;
   const selectedField = voiceFieldFor(selectedProvider);
@@ -203,7 +219,8 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const invalidVoice = TTS_PROVIDERS.some((provider) => validateVoiceDraft(draftVoices[provider], defaultVoiceFor(provider)) !== undefined);
   const dirty = providerDirty || voiceDirty || keyDirty || TTS_PROVIDERS.some((provider) => draftVoices[provider] !== undefined);
   const canWriteSettings = localOnly && snapshot.mode === "host" && snapshot.writable;
-  const credentialBlocked = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "" && !(localOnly && credentials[provider]?.writable));
+  const canWriteCredential = (provider: TtsProvider): boolean => canWriteSettings && credentials[provider]?.writable === true;
+  const credentialBlocked = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "" && !canWriteCredential(provider));
   const canSave = dirty && !saving && canWriteSettings && !credentialBlocked && !invalidVoice;
 
   const text = {
@@ -231,7 +248,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   };
 
   // DSH's PluginCard is absent while its namespace is unavailable/loading.
-  if (snapshot.status !== "ready") return null;
+  if (snapshot.status !== "ready" || snapshot.mode !== "host") return null;
 
   const editProvider = (event: { target: { value: string } }) => {
     if (!canWriteSettings || saving) return;
@@ -248,7 +265,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   };
 
   const editKey = (event: { target: { value: string } }) => {
-    if (!(localOnly && credentials[selectedProvider]?.writable) || saving) return;
+    if (!canWriteCredential(selectedProvider) || saving) return;
     const value = event.target.value;
     setDraftKeys((current) => ({ ...current, [selectedProvider]: value }));
     setFailed(false);
@@ -385,7 +402,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
           ),
           createElement("input", {
             id: `${cardId}-voice`,
-            className: styles.settingsInput,
+            className: [styles.settingsInput, voiceErrorText ? styles.settingsInputInvalid : undefined].filter(Boolean).join(" "),
             type: "text",
             autoComplete: "off",
             value: selectedVoice,
@@ -395,7 +412,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
             "aria-describedby": `${cardId}-voice-hint`,
             "data-settings-field": `${selectedProvider}-voice`
           }),
-          createElement("p", { className: styles.settingsHint, id: `${cardId}-voice-hint` }, voiceErrorText ?? text.voiceHint)
+          createElement("p", { className: [styles.settingsHint, voiceErrorText ? styles.settingsInvalid : undefined].filter(Boolean).join(" "), id: `${cardId}-voice-hint` }, voiceErrorText ?? text.voiceHint)
         ),
         createElement(
           "div",
@@ -416,7 +433,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
             type: "password",
             autoComplete: "new-password",
             value: selectedKey,
-            disabled: saving || !(localOnly && selectedCredential.writable),
+            disabled: saving || !canWriteCredential(selectedProvider),
             onChange: editKey,
             "aria-describedby": `${cardId}-key-hint`,
             "data-settings-field": `${selectedProvider}-credential`

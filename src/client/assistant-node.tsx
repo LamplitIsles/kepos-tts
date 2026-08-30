@@ -16,7 +16,6 @@ import type { ChatNodeViewProps, RenderMessageImages } from "@deepseek-ai/dsh-cl
 
 import { parseTaggedText, type TaggedTextSegment } from "../parser.js";
 import { TtsAudioPlayer, type TtsRpcClient } from "../player.js";
-import { providerProfileKey } from "../constants.js";
 import styles from "./tts.module.dshcss";
 
 // The block-family presentation below adapts the MIT-licensed
@@ -26,12 +25,12 @@ import styles from "./tts.module.dshcss";
 // mentions intact while changing only finalized prose rendering.
 
 export interface ProfileSource {
-  getSnapshot(): string;
+  getSnapshot(): string | undefined;
   subscribe(listener: () => void): () => void;
 }
 
 const EMPTY_PROFILE_SOURCE: ProfileSource = {
-  getSnapshot: () => providerProfileKey(undefined),
+  getSnapshot: () => undefined,
   subscribe: () => () => undefined
 };
 
@@ -184,7 +183,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
     if (!block) continue;
     if (block.kind === "text") {
       const profileKey = options.profileKey;
-      if (!options.streaming && !options.interrupted && !claimed && options.client && profileKey) {
+      if (!options.streaming && !options.interrupted && !claimed && options.client) {
         const parsed = parseTaggedText(block.text);
         if (parsed.passage) {
           claimed = true;
