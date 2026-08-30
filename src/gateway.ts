@@ -53,6 +53,7 @@ export interface TtsFailureDiagnostic {
   responseBytes?: number;
   requestId?: string;
   responsePrefixHex?: string;
+  responseFrameIssue?: string;
 }
 
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
@@ -112,7 +113,7 @@ function safeUpstreamMessage(message: string | undefined, sensitive: readonly st
 function providerDiagnostic(
   profile: Pick<TtsProfile, "provider" | "voice">,
   stage: NonNullable<TtsFailureDiagnostic["stage"]>,
-  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId" | "responsePrefixHex"> = {}
+  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId" | "responsePrefixHex" | "responseFrameIssue"> = {}
 ): Omit<TtsFailureDiagnostic, "category"> {
   return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
@@ -364,7 +365,7 @@ function asFrame(value: unknown): ByteDanceFrame | undefined {
     ? record.header as Record<string, unknown>
     : undefined;
   if ("code" in record && typeof record.code !== "number") return undefined;
-  if ("data" in record && typeof record.data !== "string") return undefined;
+  if ("data" in record && record.data !== null && typeof record.data !== "string") return undefined;
   if ("message" in record && typeof record.message !== "string") return undefined;
   if (header && "code" in header && typeof header.code !== "number") return undefined;
   if (header && "message" in header && typeof header.message !== "string") return undefined;
@@ -441,6 +442,42 @@ export function parseByteDanceFrames(text: string): ByteDanceFrame[] | undefined
   return frames.length > 0 ? frames : undefined;
 }
 
+function valueType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function describeByteDanceFrameIssue(text: string): string {
+  const lines = text.trim().split(/\r?\n/);
+  let sawData = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const item = lines[index]!.trim();
+    if (!item || item.startsWith(":") || item.startsWith("event:") || item.startsWith("id:") || item.startsWith("retry:")) continue;
+    const json = item.startsWith("data:") ? item.slice("data:".length).trim() : item;
+    if (!json || json === "[DONE]") continue;
+    sawData = true;
+    let value: unknown;
+    try {
+      value = JSON.parse(json);
+    } catch (error) {
+      const position = error instanceof SyntaxError
+        ? error.message.match(/position (\d+)/)?.[1]
+        : undefined;
+      return `line=${index + 1} invalid-json position=${position ?? "unknown"}`;
+    }
+    if (asFrame(value)) continue;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return `line=${index + 1} invalid-frame type=${valueType(value)}`;
+    }
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    const types = keys.map((key) => `${key}:${valueType(record[key])}`);
+    return `line=${index + 1} invalid-frame keys=${keys.join(",")} types=${types.join(",")}`;
+  }
+  return sawData ? "unknown" : "no-data-frames";
+}
+
 async function bytedanceBytes(
   fetchImpl: typeof fetch,
   credential: ResolvedCredential,
@@ -474,18 +511,25 @@ async function bytedanceBytes(
   let frames: ByteDanceFrame[] | undefined;
   let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
   let responsePrefixHex: string | undefined;
+  let responseFrameIssue: string | undefined;
   try {
     const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
     responseMeta = responseDiagnostic(response, encoded.byteLength);
     responsePrefixHex = bytePrefixHex(encoded);
-    frames = parseByteDanceFrames(new TextDecoder().decode(encoded));
+    const decoded = new TextDecoder().decode(encoded);
+    frames = parseByteDanceFrames(decoded);
+    if (!frames) responseFrameIssue = describeByteDanceFrameIssue(decoded);
   } catch {
     frames = undefined;
   }
   if (!frames) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic(
     { provider: "bytedance", voice },
     "provider-response",
-    { ...responseMeta, ...(responsePrefixHex === undefined ? {} : { responsePrefixHex }) }
+    {
+      ...responseMeta,
+      ...(responsePrefixHex === undefined ? {} : { responsePrefixHex }),
+      ...(responseFrameIssue === undefined ? {} : { responseFrameIssue })
+    }
   ));
 
   const chunks: Uint8Array[] = [];

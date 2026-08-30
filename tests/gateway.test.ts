@@ -127,6 +127,22 @@ describe("provider-neutral TTS gateway", () => {
     }
   });
 
+  it("accepts ByteDance SSE metadata frames with null audio data", async () => {
+    const cwd = await workspace();
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getSettings: () => ({ provider: "bytedance" }),
+      fetch: async () => textResponse([
+        'event: 352\ndata: {"code":0,"message":"","data":"SUQz"}',
+        'event: 352\ndata: {"code":0,"message":"","data":null,"sentence":{"text":"private"}}'
+      ].join("\n\n"), 200, { "content-type": "text/event-stream" })
+    });
+
+    await expect(gateway.synthesize({ sessionId: "session-a", text: "测试" }))
+      .resolves.toMatchObject({ bytes: 3 });
+  });
+
   it("classifies malformed, rejected, empty, and oversized provider results without exposing content", async () => {
     const cwd = await workspace();
     const base = { sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "bytedance" }) };
@@ -220,6 +236,26 @@ describe("provider-neutral TTS gateway", () => {
     })]);
     expect(JSON.stringify(failures)).not.toContain("私密正文");
     expect(JSON.stringify(failures)).not.toContain("provider-secret");
+  });
+
+  it("reports only field names and types for an invalid SSE frame", async () => {
+    const cwd = await workspace();
+    const failures: unknown[] = [];
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
+      getSettings: () => ({ provider: "bytedance" }),
+      fetch: async () => textResponse('event: 352\ndata: {"code":0,"message":"","data":{"audio":"private"}}\n\n', 200, { "content-type": "text/event-stream" }),
+      onFailure: (failure) => failures.push(failure)
+    });
+
+    await gateway.handle(RPC_ENDPOINT, { sessionId: "session-a", text: "私密正文" }, new AbortController().signal);
+
+    expect(failures).toEqual([expect.objectContaining({
+      responseFrameIssue: "line=2 invalid-frame keys=code,data,message types=code:number,data:object,message:string"
+    })]);
+    expect(JSON.stringify(failures)).not.toContain("private");
+    expect(JSON.stringify(failures)).not.toContain("私密正文");
   });
 
   it("resolves only the selected credential and does not perform network I/O when it is absent", async () => {
