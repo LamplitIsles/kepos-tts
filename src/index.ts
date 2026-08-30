@@ -43,7 +43,8 @@ export function apply(ctx: HostContext): void {
   const gateway = new TtsGateway({
     credentials: ctx.credentials,
     sessions: ctx.sessions,
-    getSettings: () => settings.get()
+    getSettings: () => settings.get(),
+    onFailure: (failure) => ctx.logger.warn("synthesis failed: %o", failure)
   });
   registerTtsRpc(ctx.connection.rpc, gateway);
   ctx.effect(() => registerTtsAudioRoute(ctx.webServer, ctx.sessions), "kepos-tts: audio route");

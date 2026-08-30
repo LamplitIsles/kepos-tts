@@ -41,6 +41,19 @@ export type TtsFailureCategory =
   | "internal"
   | "cancelled";
 
+export interface TtsFailureDiagnostic {
+  category: TtsFailureCategory;
+  provider?: TtsProfile["provider"];
+  voice?: string;
+  stage?: "session" | "credential" | "network" | "http" | "provider-response";
+  httpStatus?: number;
+  upstreamCode?: string | number;
+  upstreamMessage?: string;
+  responseContentType?: string;
+  responseBytes?: number;
+  requestId?: string;
+}
+
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
 export type { BrowserAudioPayload } from "./rpc.js";
 export {
@@ -71,16 +84,36 @@ export interface TtsGatewayOptions {
   /** Normalized settings are resolved for each admitted cache miss. */
   getSettings: () => unknown;
   fetch?: typeof fetch;
+  onFailure?: (failure: TtsFailureDiagnostic) => void;
 }
 
 export class TtsGatewayError extends Error {
   readonly category: TtsFailureCategory;
+  readonly diagnostic: Omit<TtsFailureDiagnostic, "category">;
 
-  constructor(category: TtsFailureCategory) {
+  constructor(category: TtsFailureCategory, diagnostic: Omit<TtsFailureDiagnostic, "category"> = {}) {
     super(category);
     this.name = "TtsGatewayError";
     this.category = category;
+    this.diagnostic = diagnostic;
   }
+}
+
+function safeUpstreamMessage(message: string | undefined, sensitive: readonly string[]): string | undefined {
+  if (!message) return undefined;
+  let safe = message;
+  for (const value of sensitive) {
+    if (value) safe = safe.split(value).join("<redacted>");
+  }
+  return safe.slice(0, 512);
+}
+
+function providerDiagnostic(
+  profile: Pick<TtsProfile, "provider" | "voice">,
+  stage: NonNullable<TtsFailureDiagnostic["stage"]>,
+  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId"> = {}
+): Omit<TtsFailureDiagnostic, "category"> {
+  return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
 
 function failure<T>(category: TtsFailureCategory): RpcResult<T> {
@@ -136,6 +169,65 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+function upstreamFailure(value: unknown): { code?: string | number; message?: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const header = typeof record.header === "object" && record.header !== null && !Array.isArray(record.header)
+    ? record.header as Record<string, unknown>
+    : undefined;
+  const code = typeof record.code === "string" || typeof record.code === "number"
+    ? record.code
+    : typeof header?.code === "string" || typeof header?.code === "number"
+      ? header.code
+      : undefined;
+  const message = typeof record.message === "string"
+    ? record.message
+    : typeof header?.message === "string"
+      ? header.message
+      : undefined;
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(message === undefined ? {} : { message })
+  };
+}
+
+function responseDiagnostic(response: Response, responseBytes?: number): Pick<TtsFailureDiagnostic, "responseContentType" | "responseBytes" | "requestId"> {
+  const responseContentType = response.headers.get("content-type")?.slice(0, 128);
+  const requestId = (
+    response.headers.get("x-tt-logid")
+    ?? response.headers.get("x-request-id")
+    ?? response.headers.get("x-api-request-id")
+  )?.slice(0, 256);
+  return {
+    ...(responseContentType ? { responseContentType } : {}),
+    ...(responseBytes === undefined ? {} : { responseBytes }),
+    ...(requestId ? { requestId } : {})
+  };
+}
+
+async function httpProviderRejection(
+  response: Response,
+  profile: Pick<TtsProfile, "provider" | "voice">,
+  sensitive: readonly string[]
+): Promise<TtsGatewayError> {
+  let upstream: ReturnType<typeof upstreamFailure> = {};
+  let responseBytes: number | undefined;
+  try {
+    const body = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
+    responseBytes = body.byteLength;
+    upstream = upstreamFailure(JSON.parse(new TextDecoder().decode(body)));
+  } catch {
+    // The HTTP status still provides a safe diagnostic when the body is absent or malformed.
+  }
+  const safeMessage = safeUpstreamMessage(upstream.message, sensitive);
+  return new TtsGatewayError("provider-rejected", providerDiagnostic(profile, "http", {
+    httpStatus: response.status,
+    ...responseDiagnostic(response, responseBytes),
+    ...(upstream.code === undefined ? {} : { upstreamCode: upstream.code }),
+    ...(safeMessage === undefined ? {} : { upstreamMessage: safeMessage })
+  }));
 }
 
 /** Strict base64 decoding; Buffer.from alone silently accepts malformed input. */
@@ -218,19 +310,21 @@ async function alibabaBytes(
       })
     });
   } catch {
-    throw new TtsGatewayError("provider-rejected");
+    throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "alibaba", voice }, "network"));
   }
-  if (!response.ok) throw new TtsGatewayError("provider-rejected");
+  if (!response.ok) throw await httpProviderRejection(response, { provider: "alibaba", voice }, [credential.value, text]);
 
   let body: unknown;
+  let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
   try {
     const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
+    responseMeta = responseDiagnostic(response, encoded.byteLength);
     body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
-    throw new TtsGatewayError("provider-invalid-audio");
+    throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
   }
   const audio = providerAudio(body);
-  if (!audio) throw new TtsGatewayError("provider-invalid-audio");
+  if (!audio) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
   let bytes: Uint8Array | undefined;
   if (audio.data) bytes = base64ToBytes(audio.data);
   if ((!bytes || bytes.length === 0) && audio.url) {
@@ -243,11 +337,11 @@ async function alibabaBytes(
       if (contentType && !contentType.startsWith("audio/") && contentType !== "application/octet-stream") throw new Error("content-type");
       bytes = await readBoundedResponse(audioResponse, MAX_AUDIO_BYTES);
     } catch {
-      throw new TtsGatewayError("provider-invalid-audio");
+      throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
     }
   }
   if (!bytes || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) {
-    throw new TtsGatewayError("provider-invalid-audio");
+    throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
   }
   return bytes;
 }
@@ -329,18 +423,20 @@ async function bytedanceBytes(
       })
     });
   } catch {
-    throw new TtsGatewayError("provider-rejected");
+    throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "bytedance", voice }, "network"));
   }
-  if (!response.ok) throw new TtsGatewayError("provider-rejected");
+  if (!response.ok) throw await httpProviderRejection(response, { provider: "bytedance", voice }, [credential.value, text]);
 
   let frames: ByteDanceFrame[] | undefined;
+  let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
   try {
     const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
+    responseMeta = responseDiagnostic(response, encoded.byteLength);
     frames = parseByteDanceFrames(new TextDecoder().decode(encoded));
   } catch {
     frames = undefined;
   }
-  if (!frames) throw new TtsGatewayError("provider-invalid-audio");
+  if (!frames) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
 
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -349,7 +445,7 @@ async function bytedanceBytes(
       if (frame.data !== undefined) {
         const bytes = base64ToBytes(frame.data);
         if (!bytes || total + bytes.length > MAX_AUDIO_BYTES) {
-          throw new TtsGatewayError("provider-invalid-audio");
+          throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
         }
         if (bytes.length > 0) {
           chunks.push(bytes);
@@ -359,9 +455,18 @@ async function bytedanceBytes(
       continue;
     }
     if (frame.code === 20_000_000) continue;
-    throw new TtsGatewayError("provider-rejected");
+    const safeMessage = safeUpstreamMessage(frame.message, [credential.value, text]);
+    throw new TtsGatewayError("provider-rejected", providerDiagnostic(
+      { provider: "bytedance", voice },
+      "provider-response",
+      {
+        ...responseMeta,
+        ...(frame.code === undefined ? {} : { upstreamCode: frame.code }),
+        ...(safeMessage === undefined ? {} : { upstreamMessage: safeMessage })
+      }
+    ));
   }
-  if (total === 0) throw new TtsGatewayError("provider-invalid-audio");
+  if (total === 0) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -398,7 +503,7 @@ export class TtsGateway {
     const existing = await readAudioArtifactMetadata(path, MAX_AUDIO_BYTES);
     if (existing) return existing.size;
     const credential = await this.options.credentials.resolve(credentialRef(profile.credentialRef));
-    if (!credential?.value) throw new TtsGatewayError("unavailable");
+    if (!credential?.value) throw new TtsGatewayError("unavailable", providerDiagnostic(profile, "credential"));
     const bytes = await providerBytes(this.fetchImpl, credential, text, profile);
     await writeAudioArtifactAtomic(path, bytes, MAX_AUDIO_BYTES);
     return bytes.byteLength;
@@ -429,7 +534,7 @@ export class TtsGateway {
     const settings = this.options.getSettings();
     const profile = profileFromSettings(settings);
     const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
-    if (!workspace) throw new TtsGatewayError("unavailable");
+    if (!workspace) throw new TtsGatewayError("unavailable", providerDiagnostic(profile, "session"));
     const digest = cacheDigest(request.text, settings, CACHE_FORMAT_VERSION);
     const path = audioArtifactPath(workspace, digest);
     // The provider request intentionally does not receive the browser signal:
@@ -448,6 +553,16 @@ export class TtsGateway {
       return { ok: true, value: await this.synthesize(payload, signal) };
     } catch (error) {
       const category = error instanceof TtsGatewayError ? error.category : "internal";
+      if (category !== "invalid-input" && category !== "cancelled") {
+        try {
+          this.options.onFailure?.({
+            category,
+            ...(error instanceof TtsGatewayError ? error.diagnostic : {})
+          });
+        } catch {
+          // Observability must not change the RPC result.
+        }
+      }
       return failure(category);
     }
   }

@@ -65,8 +65,8 @@ const en: Record<TtsLocaleKey, string> = {
 };
 
 const zh: Record<TtsLocaleKey, string> = {
-  title: "标记语音",
-  description: "选择用于预取助手标记片段的服务商和声音。",
+  title: "语音合成",
+  description: "选择语音合成使用的服务商和声音。",
   provider: "服务商",
   providerHint: "保存后，新片段将使用此服务商。",
   voice: "声音 ID",

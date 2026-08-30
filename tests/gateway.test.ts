@@ -140,6 +140,62 @@ describe("provider-neutral TTS gateway", () => {
     expect(JSON.stringify(await rejected.handle(RPC_ENDPOINT, { sessionId: "session-a", text: "你好" }, new AbortController().signal))).not.toContain("do not expose");
   });
 
+  it("reports safe ByteDance response and HTTP diagnostics without request text or credentials", async () => {
+    const cwd = await workspace();
+    const failures: unknown[] = [];
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
+      getSettings: () => ({ provider: "bytedance", bytedanceVoice: "voice-a" }),
+      fetch: async () => jsonResponse({ code: 3001, message: "voice-a rejected provider-secret for 私密正文" }),
+      onFailure: (failure) => failures.push(failure)
+    });
+
+    await expect(gateway.handle(
+      RPC_ENDPOINT,
+      { sessionId: "session-a", text: "私密正文" },
+      new AbortController().signal
+    )).resolves.toMatchObject({ ok: false, error: { message: "provider-rejected" } });
+
+    const httpFailure = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
+      getSettings: () => ({ provider: "bytedance", bytedanceVoice: "voice-a" }),
+      fetch: async () => jsonResponse({ code: "Forbidden", message: "provider-secret cannot synthesize 私密正文" }, 403),
+      onFailure: (failure) => failures.push(failure)
+    });
+    await httpFailure.handle(
+      RPC_ENDPOINT,
+      { sessionId: "session-a", text: "私密正文" },
+      new AbortController().signal
+    );
+
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toMatchObject({
+      category: "provider-rejected",
+      provider: "bytedance",
+      voice: "voice-a",
+      stage: "provider-response",
+      upstreamCode: 3001,
+      upstreamMessage: "voice-a rejected <redacted> for <redacted>",
+      responseContentType: "application/json",
+      responseBytes: expect.any(Number)
+    });
+    expect(failures[1]).toMatchObject({
+      category: "provider-rejected",
+      provider: "bytedance",
+      voice: "voice-a",
+      stage: "http",
+      httpStatus: 403,
+      upstreamCode: "Forbidden",
+      upstreamMessage: "<redacted> cannot synthesize <redacted>",
+      responseContentType: "application/json",
+      responseBytes: expect.any(Number)
+    });
+    expect(JSON.stringify(failures)).not.toContain("provider-secret");
+    expect(JSON.stringify(failures)).not.toContain("私密正文");
+  });
+
   it("resolves only the selected credential and does not perform network I/O when it is absent", async () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
