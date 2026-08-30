@@ -1,4 +1,4 @@
-import { createElement, useEffect, useId, useState } from "react";
+import { createElement, useEffect, useId, useRef, useState } from "react";
 import type { SettingsScope } from "@deepseek-ai/dsh-client-runtime/client";
 import { IconChevronDownOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
 
@@ -69,6 +69,12 @@ const DEFAULT_STATUSES: Record<TtsProvider, CredentialStatus> = {
   bytedance: DEFAULT_STATUS
 };
 const EMPTY_DRAFT_KEYS: Record<TtsProvider, string> = { alibaba: "", bytedance: "" };
+
+interface PreservedDraftAttempt {
+  provider: TtsProvider | undefined;
+  voices: Partial<Record<TtsProvider, string>>;
+  keys: Record<TtsProvider, string>;
+}
 
 function credentialRefFor(provider: TtsProvider): string {
   return provider === "bytedance" ? BYTEDANCE_CREDENTIAL_REF : ALIBABA_CREDENTIAL_REF;
@@ -160,6 +166,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
+  const preservedAttemptRef = useRef<PreservedDraftAttempt | undefined>(undefined);
   const cardId = useId();
 
   useEffect(() => scope.subscribe(() => {
@@ -170,11 +177,20 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     // value is no longer dirty; clearing it here lets a later Host refresh
     // flow through instead of leaving the input stuck on stale local state.
     setBaseline(nextBaseline);
-    setDraftProvider((current) => current === nextBaseline.provider ? undefined : current);
+    const preservedAttempt = preservedAttemptRef.current;
+    setDraftProvider((current) => {
+      if (preservedAttempt?.provider !== undefined) return preservedAttempt.provider;
+      return current === nextBaseline.provider ? undefined : current;
+    });
     setDraftVoices((current) => {
       const nextDrafts: Partial<Record<TtsProvider, string>> = {};
       for (const provider of TTS_PROVIDERS) {
         const draft = current[provider];
+        const preservedDraft = preservedAttempt?.voices[provider];
+        if (preservedDraft !== undefined) {
+          nextDrafts[provider] = preservedDraft;
+          continue;
+        }
         if (draft === undefined) continue;
         const fallback = defaultVoiceFor(provider);
         const field = voiceFieldFor(provider);
@@ -250,9 +266,31 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   // DSH's PluginCard is absent while its namespace is unavailable/loading.
   if (snapshot.status !== "ready" || snapshot.mode !== "host") return null;
 
+  const forgetPreservedProvider = () => {
+    const preserved = preservedAttemptRef.current;
+    if (preserved) preservedAttemptRef.current = { ...preserved, provider: undefined };
+  };
+
+  const forgetPreservedVoice = (provider: TtsProvider) => {
+    const preserved = preservedAttemptRef.current;
+    if (!preserved) return;
+    const voices = { ...preserved.voices };
+    delete voices[provider];
+    preservedAttemptRef.current = { ...preserved, voices };
+  };
+
+  const forgetPreservedKey = (provider: TtsProvider) => {
+    const preserved = preservedAttemptRef.current;
+    if (!preserved) return;
+    const keys = { ...preserved.keys };
+    delete keys[provider];
+    preservedAttemptRef.current = { ...preserved, keys };
+  };
+
   const editProvider = (event: { target: { value: string } }) => {
     if (!canWriteSettings || saving) return;
     const next = normalizeProvider(event.target.value);
+    forgetPreservedProvider();
     setDraftProvider(next === baseline.provider ? undefined : next);
     setFailed(false);
   };
@@ -260,6 +298,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const editVoice = (event: { target: { value: string } }) => {
     if (!canWriteSettings || saving) return;
     const value = event.target.value;
+    forgetPreservedVoice(selectedProvider);
     setDraftVoices((current) => ({ ...current, [selectedProvider]: value === selectedSavedVoice ? undefined : value }));
     setFailed(false);
   };
@@ -267,12 +306,14 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const editKey = (event: { target: { value: string } }) => {
     if (!canWriteCredential(selectedProvider) || saving) return;
     const value = event.target.value;
+    forgetPreservedKey(selectedProvider);
     setDraftKeys((current) => ({ ...current, [selectedProvider]: value }));
     setFailed(false);
   };
 
   const discard = () => {
     if (saving) return;
+    preservedAttemptRef.current = undefined;
     setDraftProvider(undefined);
     setDraftVoices({});
     setDraftKeys({ ...EMPTY_DRAFT_KEYS });
@@ -287,6 +328,8 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     const stagedProvider = draftProvider;
     const stagedVoices = { ...draftVoices };
     const stagedKeys = { ...draftKeys };
+    const stagedBaseline = baseline;
+    preservedAttemptRef.current = { provider: stagedProvider, voices: stagedVoices, keys: stagedKeys };
     setSaving(true);
     setFailed(false);
     const credentialProviders: TtsProvider[] = [];
@@ -294,25 +337,25 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
       // Credentials must land before a setting can select a profile that needs
       // one. Keep every draft until the whole ordered transaction succeeds.
       for (const provider of TTS_PROVIDERS) {
-        const value = (draftKeys[provider] ?? "").trim();
+        const value = (stagedKeys[provider] ?? "").trim();
         if (!value) continue;
         await saveCredential(api, value, credentialRefFor(provider));
         credentialProviders.push(provider);
       }
 
       for (const provider of TTS_PROVIDERS) {
-        const draft = draftVoices[provider];
+        const draft = stagedVoices[provider];
         const field = voiceFieldFor(provider);
         if (draft === undefined) continue;
         const value = normalizeVoiceId(draft, defaultVoiceFor(provider));
-        if (value === baseline[field]) continue;
+        if (value === stagedBaseline[field]) continue;
         await scope.set(field, value);
         if (normalizeSettings(scope.getSnapshot().value)[field] !== value) throw new Error("settings-rejected");
       }
 
-      if (draftProvider !== undefined && draftProvider !== baseline.provider) {
-        await scope.set("provider", draftProvider);
-        if (normalizeSettings(scope.getSnapshot().value).provider !== draftProvider) throw new Error("settings-rejected");
+      if (stagedProvider !== undefined && stagedProvider !== stagedBaseline.provider) {
+        await scope.set("provider", stagedProvider);
+        if (normalizeSettings(scope.getSnapshot().value).provider !== stagedProvider) throw new Error("settings-rejected");
       }
 
       await Promise.all(credentialProviders.map(async (provider) => {
@@ -322,6 +365,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
       // The scope has settled each accepted write. Reading it here also keeps
       // clean fields current if another Host refresh arrived while saving.
       setBaseline(normalizeSettings(scope.getSnapshot().value));
+      preservedAttemptRef.current = undefined;
       setDraftProvider(undefined);
       setDraftVoices({});
       setDraftKeys({ ...EMPTY_DRAFT_KEYS });

@@ -74,6 +74,12 @@ describe("tagged TTS player", () => {
     expect(bytedance.preparedUrl("同一句", '["bytedance","seed-tts-2.0","voice"]', "session-a")).toBe(payload.url);
     alibaba.dispose();
     bytedance.dispose();
+
+    const remountedAlibaba = new TtsPlayer(client);
+    await remountedAlibaba.prepare("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a");
+    expect(calls).toBe(2);
+    expect(remountedAlibaba.preparedUrl("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a")).toBe(payload.url);
+    remountedAlibaba.dispose();
   });
 
   it("keeps shared generation alive after disposal and lets a later mount reuse it", async () => {

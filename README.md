@@ -28,9 +28,9 @@ characters can be entered. Store the selected provider's key using the card's
 write-only password field. DSH credentials hold Alibaba under
 `KEPOS_TTS_DASHSCOPE_API_KEY` and ByteDance under
 `KEPOS_TTS_VOLCENGINE_API_KEY`; this plugin never reads or displays saved
-values. There is no agenix or remote configuration path: unavailable or
-memory-backed Settings scopes hide the card, while a ready non-writable scope
-shows it read-only.
+values. There is no agenix or remote configuration path. In remote DSH Web, an
+unavailable or memory-backed Settings scope does not render this card; only a
+ready non-writable Host scope shows it read-only.
 
 Alibaba uses Qwen3-TTS Flash with Chinese MP3 output. ByteDance uses the
 domestic Volcengine V3 `seed-tts-2.0` unidirectional endpoint with MP3 at 24

@@ -115,7 +115,7 @@ describe("dual-provider native settings card", () => {
     root!.unmount();
   });
 
-  it("writes credentials, voices, then provider and retains all drafts after rejection", async () => {
+  it("retains every staged draft through ordered rejection and later Host refreshes", async () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }, true, new Set(["provider"]));
     const credentialWrites: unknown[] = [];
     let root: ReturnType<typeof create> | undefined;
@@ -124,15 +124,37 @@ describe("dual-provider native settings card", () => {
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.onChange({ target: { value: "custom-alibaba" } }); });
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-credential" }).props.onChange({ target: { value: "secret" } }); });
     await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "bytedance" } }); });
+    await act(async () => { root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.onChange({ target: { value: "custom-bytedance" } }); });
+    await act(async () => { root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.onChange({ target: { value: "bytedance-secret" } }); });
     const save = root!.root.findAllByType("button").find((button) => button.props.children === "Save")!;
     await act(async () => { await save.props.onClick(); });
-    expect(credentialWrites[0]).toEqual(["set", { ref: ALIBABA_CREDENTIAL_REF, value: "secret" }]);
-    expect(controlled.writes).toEqual([["alibabaVoice", "custom-alibaba"], ["provider", "bytedance"]]);
-    expect(root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.value).toBe(DEFAULT_BYTEDANCE_VOICE);
-    expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.value).toBe("");
+    expect(credentialWrites).toEqual([
+      ["set", { ref: ALIBABA_CREDENTIAL_REF, value: "secret" }],
+      ["set", { ref: BYTEDANCE_CREDENTIAL_REF, value: "bytedance-secret" }]
+    ]);
+    expect(controlled.writes).toEqual([
+      ["alibabaVoice", "custom-alibaba"],
+      ["bytedanceVoice", "custom-bytedance"],
+      ["provider", "bytedance"]
+    ]);
+    expect(root!.root.findByType("select").props.value).toBe("bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.value).toBe("custom-bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.value).toBe("bytedance-secret");
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("did not accept");
+
+    controlled.update({ provider: "alibaba", alibabaVoice: "custom-alibaba", bytedanceVoice: "custom-bytedance" });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByType("select").props.value).toBe("bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.value).toBe("custom-bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.value).toBe("bytedance-secret");
+    controlled.update({ provider: "alibaba", alibabaVoice: "host-alibaba-again", bytedanceVoice: "host-bytedance-again" });
+    await act(async () => { await Promise.resolve(); });
+    expect(root!.root.findByType("select").props.value).toBe("bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.value).toBe("custom-bytedance");
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.value).toBe("bytedance-secret");
     await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "alibaba" } }); });
     expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("custom-alibaba");
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-credential" }).props.value).toBe("secret");
     root!.unmount();
   });
 

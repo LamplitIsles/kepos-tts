@@ -37,8 +37,8 @@ export const TtsSettingsSchema = z.transform(
   ttsSettingsShape,
   (value) => ({
     provider: value.provider,
-    alibabaVoice: typeof value.alibabaVoice === "string" ? value.alibabaVoice.trim() : "Maia",
-    bytedanceVoice: typeof value.bytedanceVoice === "string" ? value.bytedanceVoice.trim() : "zh_female_sajiaoxuemei_uranus_bigtts"
+    alibabaVoice: value.alibabaVoice,
+    bytedanceVoice: value.bytedanceVoice
   }),
   true
 ).default({
