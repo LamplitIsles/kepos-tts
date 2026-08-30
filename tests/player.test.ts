@@ -59,6 +59,23 @@ describe("tagged TTS player", () => {
     two.dispose();
   });
 
+  it("keeps page preparation separate for different provider profiles", async () => {
+    let calls = 0;
+    const client = { synthesize: async () => { calls += 1; return payload; } };
+    clearTtsPreparationCache(client);
+    const alibaba = new TtsPlayer(client);
+    const bytedance = new TtsPlayer(client);
+    await Promise.all([
+      alibaba.prepare("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a"),
+      bytedance.prepare("同一句", '["bytedance","seed-tts-2.0","voice"]', "session-a")
+    ]);
+    expect(calls).toBe(2);
+    expect(alibaba.preparedUrl("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a")).toBe(payload.url);
+    expect(bytedance.preparedUrl("同一句", '["bytedance","seed-tts-2.0","voice"]', "session-a")).toBe(payload.url);
+    alibaba.dispose();
+    bytedance.dispose();
+  });
+
   it("keeps shared generation alive after disposal and lets a later mount reuse it", async () => {
     let settle!: (value: BrowserAudioPayload) => void;
     let calls = 0;

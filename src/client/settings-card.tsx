@@ -281,6 +281,12 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
 
   const save = async () => {
     if (!canSave) return;
+    // Host snapshots can arrive between ordered writes. Keep a copy of the
+    // complete transaction so reconciliation cannot erase a staged value if a
+    // later write rejects and the user needs to retry the same Save.
+    const stagedProvider = draftProvider;
+    const stagedVoices = { ...draftVoices };
+    const stagedKeys = { ...draftKeys };
     setSaving(true);
     setFailed(false);
     const credentialProviders: TtsProvider[] = [];
@@ -322,6 +328,9 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     } catch {
       // An earlier credential may have succeeded; retaining all drafts makes a
       // retry safe and gives the user the exact values that still need landing.
+      setDraftProvider(stagedProvider);
+      setDraftVoices(stagedVoices);
+      setDraftKeys(stagedKeys);
       await Promise.all(credentialProviders.map(async (provider) => {
         const status = await describeCredential(api, credentialRefFor(provider));
         setCredentials((current) => ({ ...current, [provider]: status }));

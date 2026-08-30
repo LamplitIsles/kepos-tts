@@ -15,8 +15,10 @@ characters). The card reports each selected credential's configured state and
 never renders its value. DSH stores Alibaba under
 `KEPOS_TTS_DASHSCOPE_API_KEY` and ByteDance under
 `KEPOS_TTS_VOLCENGINE_API_KEY`; there is no agenix or remote configuration
-endpoint. A Kepos-published URL can play tagged TTS after local setup, while a
-remote Settings card is read-only. When a tagged message completes, the browser
+endpoint. An unavailable or memory-backed remote Settings scope hides the
+card; a ready non-writable scope is read-only. Tagged TTS still reaches the
+Host in those scopes, but page-memory preparation sharing starts only after a
+real ready Host profile exists. When a tagged message completes, the browser
 immediately prepares its MP3 and replaces the tag with the browser's native
 audio player. If synthesis fails, the transcript stays visible.
 

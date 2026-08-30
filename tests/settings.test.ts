@@ -131,6 +131,8 @@ describe("dual-provider native settings card", () => {
     expect(root!.root.findByProps({ "data-settings-field": "bytedance-voice" }).props.value).toBe(DEFAULT_BYTEDANCE_VOICE);
     expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.value).toBe("");
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("did not accept");
+    await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "alibaba" } }); });
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.value).toBe("custom-alibaba");
     root!.unmount();
   });
 
