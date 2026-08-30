@@ -29,6 +29,7 @@ export interface TtsAudioPlayerProps {
 
 interface PreparationEntry {
   promise: Promise<BrowserAudioPayload>;
+  payload?: BrowserAudioPayload;
 }
 
 interface CachedAudio {
@@ -94,6 +95,18 @@ export class TtsPlayer {
     return this.hasCached(text, voiceKey, sessionId) ? this.cached?.url : undefined;
   }
 
+  /** Seed a remounted player from resolved page memory without publishing a new state cycle. */
+  hydrate(text: string, voiceKey: string, sessionId: string): boolean {
+    if (this.disposed) return false;
+    const key = preparationKey(text, voiceKey, sessionId);
+    const payload = cacheFor(this.client).get(key)?.payload;
+    if (!payload) return false;
+    this.currentKey = key;
+    this.cached = { key, url: payload.url };
+    this.snapshot = { status: "ready" };
+    return true;
+  }
+
   async prepare(text: string, voiceKey: string, sessionId: string): Promise<void> {
     if (this.disposed) return;
     const normalized = normalizeTtsText(text);
@@ -101,7 +114,7 @@ export class TtsPlayer {
     const generation = ++this.generation;
     this.currentKey = key;
     if (this.cached?.key === key) {
-      this.publish({ status: "ready" });
+      if (this.snapshot.status !== "ready") this.publish({ status: "ready" });
       return;
     }
 
@@ -112,14 +125,15 @@ export class TtsPlayer {
       const promise = Promise.resolve()
         .then(() => this.client.synthesize(normalized, sessionId, controller.signal))
         .then(validPayload);
-      entry = { promise };
-      cache.set(key, entry);
+      const created: PreparationEntry = { promise };
+      entry = created;
+      cache.set(key, created);
       promise.then(
-        () => {
-          if (cache.get(key) === entry) return;
+        (payload) => {
+          if (cache.get(key) === created) created.payload = payload;
         },
         () => {
-          if (cache.get(key) === entry) cache.delete(key);
+          if (cache.get(key) === created) cache.delete(key);
         }
       );
     }
@@ -157,7 +171,11 @@ export function TtsAudioPlayer({
   className
 }: TtsAudioPlayerProps) {
   const playerRef = useRef<TtsPlayer | null>(null);
-  if (!playerRef.current) playerRef.current = new TtsPlayer(client);
+  if (!playerRef.current) {
+    const player = new TtsPlayer(client);
+    player.hydrate(text, voiceKey, sessionId);
+    playerRef.current = player;
+  }
   const player = playerRef.current;
   const preparationRef = useRef<{ text: string; voiceKey: string; sessionId: string } | null>(null);
   if (!preparationRef.current) preparationRef.current = { text, voiceKey, sessionId };

@@ -77,6 +77,38 @@ describe("tagged TTS player", () => {
     second.dispose();
   });
 
+  it("renders a remounted prepared passage as ready on its first frame", async () => {
+    let calls = 0;
+    const client = { synthesize: async () => { calls += 1; return payload; } };
+    clearTtsPreparationCache(client);
+    let first: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      first = create(createElement(TtsAudioPlayer, {
+        text: "已经准备",
+        voiceKey: "onoAnna",
+        sessionId: "session-a",
+        client
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    first!.unmount();
+
+    let remounted: ReturnType<typeof create> | undefined;
+    act(() => {
+      remounted = create(createElement(TtsAudioPlayer, {
+        text: "已经准备",
+        voiceKey: "onoAnna",
+        sessionId: "session-a",
+        client
+      }));
+    });
+
+    expect(calls).toBe(1);
+    expect(remounted!.root.findByType("audio").props.src).toBe(payload.url);
+    remounted!.unmount();
+  });
+
   it("removes failed preparation so a later occurrence can retry", async () => {
     let calls = 0;
     const client = {
