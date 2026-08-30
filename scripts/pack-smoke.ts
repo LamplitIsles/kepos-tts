@@ -135,7 +135,7 @@ try {
   }
 
   const patch = readFileSync(join(packageDir, "cordis.patch.yml"), "utf8");
-  for (const required of ["kepos-tts", "@lamplitisles/kepos-tts", "connection", "credentials", "settings", "systemPrompt"]) {
+  for (const required of ["kepos-tts", "@lamplitisles/kepos-tts", "connection", "credentials", "settings", "systemPrompt", "sessions", "webServer"]) {
     if (!patch.includes(required)) throw new Error(`Cordis patch is missing ${required}`);
   }
 
@@ -166,6 +166,9 @@ try {
     !clientCode.includes('data-plugin-css') ||
     !/\.[A-Za-z0-9]+_player audio\{width:100%;height:32px\}/.test(clientCode) ||
     !clientCode.includes('"player":') ||
+    clientCode.includes("createObjectURL") ||
+    clientCode.includes("revokeObjectURL") ||
+    clientCode.includes("data:audio/") ||
     clientCode.includes('require("@deepseek-ai/dsh-credentials")') ||
     clientCode.includes('require("@deepseek-ai/schemastery")')
   ) {

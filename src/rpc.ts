@@ -3,6 +3,7 @@ export const RPC_ENDPOINT = "synthesize";
 
 export interface BrowserAudioPayload {
   mediaType: "audio/mpeg";
-  data: string;
+  /** Stable same-origin URL for the workspace-owned artifact. */
+  url: string;
   bytes: number;
 }

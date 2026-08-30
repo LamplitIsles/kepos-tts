@@ -10,9 +10,29 @@ import {
   VOICE_LABELS,
   normalizeVoice
 } from "./constants.js";
+import { normalizeTtsText } from "./parser.js";
+import {
+  AUDIO_ROUTE_PATH,
+  CACHE_FORMAT_VERSION,
+  MAX_AUDIO_BYTES,
+  TTS_AUDIO_ROUTE,
+  TTS_CACHE_DIRECTORY,
+  TTS_CACHE_FORMAT_VERSION,
+  audioArtifactPath,
+  audioCacheDirectory,
+  audioUrl,
+  cacheDigest,
+  createCacheKey,
+  readAudioArtifact,
+  registerTtsAudioRoute,
+  resolveSessionWorkspace,
+  serveTtsAudio,
+  writeAudioArtifactAtomic,
+  type AudioRouteRegistrar,
+  type AudioResponse,
+  type SessionResolver
+} from "./audio-cache.js";
 import { RPC_CHANNEL, RPC_ENDPOINT, type BrowserAudioPayload } from "./rpc.js";
-
-export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 export type TtsFailureCategory =
   | "invalid-input"
@@ -24,6 +44,25 @@ export type TtsFailureCategory =
 
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
 export type { BrowserAudioPayload } from "./rpc.js";
+export {
+  AUDIO_ROUTE_PATH,
+  CACHE_FORMAT_VERSION,
+  MAX_AUDIO_BYTES,
+  TTS_AUDIO_ROUTE,
+  TTS_CACHE_DIRECTORY,
+  TTS_CACHE_FORMAT_VERSION,
+  audioArtifactPath,
+  audioCacheDirectory,
+  audioUrl,
+  cacheDigest,
+  createCacheKey,
+  readAudioArtifact,
+  registerTtsAudioRoute,
+  resolveSessionWorkspace,
+  serveTtsAudio,
+  writeAudioArtifactAtomic
+} from "./audio-cache.js";
+export type { AudioRouteRegistrar, AudioResponse, SessionResolver } from "./audio-cache.js";
 
 export interface CredentialResolver {
   resolve(ref: ReturnType<typeof credentialRef>): Promise<ResolvedCredential | undefined>;
@@ -31,6 +70,7 @@ export interface CredentialResolver {
 
 export interface TtsGatewayOptions {
   credentials: CredentialResolver | Pick<CredentialProvider, "resolve">;
+  sessions: SessionResolver;
   getVoice: () => unknown;
   fetch?: typeof fetch;
 }
@@ -63,17 +103,6 @@ function asBytes(value: ArrayBuffer): Uint8Array {
   return new Uint8Array(value);
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  const buffer = (globalThis as { Buffer?: { from(value: Uint8Array): { toString(encoding: string): string } } }).Buffer;
-  if (buffer) return buffer.from(bytes).toString("base64");
-  let binary = "";
-  const chunk = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
-  }
-  return btoa(binary);
-}
-
 function base64ToBytes(value: string): Uint8Array | undefined {
   const dataUri = value.match(/^data:[^;,]+;base64,(.*)$/s);
   if (dataUri) value = dataUri[1]!;
@@ -90,17 +119,26 @@ function base64ToBytes(value: string): Uint8Array | undefined {
   }
 }
 
-function textFromPayload(payload: unknown): string {
+interface SynthesisRequest {
+  text: string;
+  sessionId: string;
+}
+
+function requestFromPayload(payload: unknown): SynthesisRequest {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new TtsGatewayError("invalid-input");
   }
+  const record = payload as { text?: unknown; sessionId?: unknown };
   const keys = Object.keys(payload);
-  if (keys.length !== 1 || keys[0] !== "text") throw new TtsGatewayError("invalid-input");
-  const text = (payload as { text?: unknown }).text;
-  if (typeof text !== "string") throw new TtsGatewayError("invalid-input");
-  const normalized = text.replace(/[\s\u00a0]+/gu, " ").trim();
-  if (!normalized || Array.from(normalized).length > TTS_MAX_CHARS) throw new TtsGatewayError("invalid-input");
-  return normalized;
+  if (keys.some((key) => key !== "text" && key !== "sessionId") || !keys.includes("text") || !keys.includes("sessionId")) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  if (typeof record.text !== "string" || typeof record.sessionId !== "string" || !record.sessionId.trim()) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  const text = normalizeTtsText(record.text);
+  if (!text || Array.from(text).length > TTS_MAX_CHARS) throw new TtsGatewayError("invalid-input");
+  return { text, sessionId: record.sessionId };
 }
 
 function providerAudio(response: unknown): { data?: string; url?: string } | undefined {
@@ -117,77 +155,120 @@ function providerAudio(response: unknown): { data?: string; url?: string } | und
   };
 }
 
+async function providerBytes(
+  fetchImpl: typeof fetch,
+  credential: ResolvedCredential,
+  text: string,
+  voice: keyof typeof VOICE_LABELS
+): Promise<Uint8Array> {
+  let response: Response;
+  try {
+    response = await fetchImpl(DASHSCOPE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credential.value}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: QWEN_MODEL,
+        input: { text, voice: VOICE_LABELS[voice], language_type: "Chinese" },
+        parameters: { format: "mp3" },
+        stream: false
+      })
+    });
+  } catch {
+    throw new TtsGatewayError("provider-rejected");
+  }
+  if (!response.ok) throw new TtsGatewayError("provider-rejected");
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new TtsGatewayError("provider-invalid-audio");
+  }
+  const audio = providerAudio(body);
+  if (!audio) throw new TtsGatewayError("provider-invalid-audio");
+  let bytes: Uint8Array | undefined;
+  if (audio.data) bytes = base64ToBytes(audio.data);
+  if ((!bytes || bytes.length === 0) && audio.url) {
+    try {
+      const url = new URL(audio.url);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("scheme");
+      const audioResponse = await fetchImpl(url.toString(), { method: "GET" });
+      if (!audioResponse.ok) throw new Error("status");
+      const contentType = typeof audioResponse.headers?.get === "function" ? audioResponse.headers.get("content-type") : "";
+      if (contentType && !contentType.startsWith("audio/") && contentType !== "application/octet-stream") throw new Error("content-type");
+      bytes = asBytes(await audioResponse.arrayBuffer());
+    } catch {
+      throw new TtsGatewayError("provider-invalid-audio");
+    }
+  }
+  if (!bytes || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) {
+    throw new TtsGatewayError("provider-invalid-audio");
+  }
+  return bytes;
+}
+
+/** Shared in-flight work survives individual gateway instances and renderer disposal. */
+const inFlight = new Map<string, Promise<Uint8Array>>();
+
 export class QwenTtsGateway {
   private readonly fetchImpl: typeof fetch;
-  private readonly endpoint: string;
 
   constructor(private readonly options: TtsGatewayOptions) {
     this.fetchImpl = options.fetch ?? fetch;
-    this.endpoint = DASHSCOPE_ENDPOINT;
+  }
+
+  private async generateAndCache(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<Uint8Array> {
+    // This disk check wins a race with another process that published the same
+    // deterministic artifact while this request was being scheduled.
+    const existing = await readAudioArtifact(path, MAX_AUDIO_BYTES);
+    if (existing) return existing;
+    const credential = await this.options.credentials.resolve(credentialRef(CREDENTIAL_REF));
+    if (!credential?.value) throw new TtsGatewayError("unavailable");
+    const bytes = await providerBytes(this.fetchImpl, credential, text, voice);
+    await writeAudioArtifactAtomic(path, bytes, MAX_AUDIO_BYTES);
+    return bytes;
+  }
+
+  private async artifact(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<Uint8Array> {
+    const pending = inFlight.get(path);
+    if (pending) return pending;
+    // Keep the in-flight entry from the initial disk lookup onward. This
+    // closes the small race where identical callers both observe a miss before
+    // either provider request has started.
+    const generation = this.generateAndCache(path, text, voice);
+    inFlight.set(path, generation);
+    generation.then(
+      () => {
+        if (inFlight.get(path) === generation) inFlight.delete(path);
+      },
+      () => {
+        if (inFlight.get(path) === generation) inFlight.delete(path);
+      }
+    );
+    return generation;
   }
 
   async synthesize(payload: unknown, signal?: AbortSignal): Promise<BrowserAudioPayload> {
     if (signal?.aborted) throw new TtsGatewayError("cancelled");
-    const text = textFromPayload(payload);
-    const credential = await this.options.credentials.resolve(credentialRef(CREDENTIAL_REF));
-    if (!credential?.value) throw new TtsGatewayError("unavailable");
-    const voice = normalizeVoice(this.options.getVoice());
-    let response: Response;
-    try {
-      const request: RequestInit = {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${credential.value}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          model: QWEN_MODEL,
-          input: { text, voice: VOICE_LABELS[voice], language_type: "Chinese" },
-          parameters: { format: "mp3" },
-          stream: false
-        })
-      };
-      if (signal) request.signal = signal;
-      response = await this.fetchImpl(this.endpoint, request);
-    } catch (error) {
-      if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
-        throw new TtsGatewayError("cancelled");
-      }
-      throw new TtsGatewayError("provider-rejected");
-    }
-    if (!response.ok) throw new TtsGatewayError("provider-rejected");
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      throw new TtsGatewayError("provider-invalid-audio");
-    }
-    const audio = providerAudio(body);
-    if (!audio) throw new TtsGatewayError("provider-invalid-audio");
-    let bytes: Uint8Array | undefined;
-    if (audio.data) bytes = base64ToBytes(audio.data);
-    if ((!bytes || bytes.length === 0) && audio.url) {
-      try {
-        const url = new URL(audio.url);
-        if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("scheme");
-        const request: RequestInit = { method: "GET" };
-        if (signal) request.signal = signal;
-        const audioResponse = await this.fetchImpl(url.toString(), request);
-        if (!audioResponse.ok) throw new Error("status");
-        const contentType = typeof audioResponse.headers?.get === "function" ? audioResponse.headers.get("content-type") : "";
-        if (contentType && !contentType.startsWith("audio/") && contentType !== "application/octet-stream") throw new Error("content-type");
-        bytes = asBytes(await audioResponse.arrayBuffer());
-      } catch (error) {
-        if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
-          throw new TtsGatewayError("cancelled");
-        }
-        throw new TtsGatewayError("provider-invalid-audio");
-      }
-    }
-    if (!bytes || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) {
-      throw new TtsGatewayError("provider-invalid-audio");
-    }
-    return { mediaType: "audio/mpeg", data: bytesToBase64(bytes), bytes: bytes.length };
+    const request = requestFromPayload(payload);
+    const voice = normalizeVoice(this.options.getVoice()) as keyof typeof VOICE_LABELS;
+    const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
+    if (!workspace) throw new TtsGatewayError("unavailable");
+    const digest = cacheDigest(request.text, voice, CACHE_FORMAT_VERSION);
+    const path = audioArtifactPath(workspace, digest);
+    // The provider request intentionally does not receive the browser signal:
+    // once admitted, generation must finish so another occurrence can reuse it.
+    await this.artifact(path, request.text, voice);
+    const cached = await readAudioArtifact(path, MAX_AUDIO_BYTES);
+    if (!cached) throw new TtsGatewayError("internal");
+    return {
+      mediaType: "audio/mpeg",
+      url: audioUrl(request.sessionId, digest),
+      bytes: cached.byteLength
+    };
   }
 
   async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<BrowserAudioPayload>> {

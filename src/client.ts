@@ -21,8 +21,9 @@ import type { TtsRpcClient } from "./player.js";
 export const inject = ["connection", "locale", "settingsScope", "slots"] as const;
 
 export type TtsLocaleKey =
-  | "title" | "description" | "voice" | "apiKey" | "configured" | "source" | "writable"
-  | "unavailable" | "save" | "remove" | "saved" | "failed" | "message.reasoning"
+  | "title" | "description" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
+  | "configured" | "notConfigured" | "expand" | "collapse" | "unsaved" | "save"
+  | "saving" | "discard" | "saveFailed" | "readOnly" | "message.reasoning"
   | "message.unknownBlock" | "message.stopped" | "message.preparingAudio" | "message.audio"
   | "message.audioUnavailable" | "json.truncated" | "row.running";
 
@@ -36,15 +37,19 @@ const en: Record<TtsLocaleKey, string> = {
   title: "Qwen voice",
   description: "Choose the voice used to prepare tagged assistant passages.",
   voice: "Voice",
+  voiceHint: "New passages use this voice after you save.",
   apiKey: "DashScope API key",
+  apiKeyHint: "Enter a new key to replace the configured key. Leave blank to keep it.",
   configured: "Configured",
-  source: "Source",
-  writable: "Writable",
-  unavailable: "Unavailable",
-  save: "Save key",
-  remove: "Remove key",
-  saved: "Saved",
-  failed: "Could not save this change",
+  notConfigured: "Not configured",
+  expand: "Expand",
+  collapse: "Collapse",
+  unsaved: "Unsaved",
+  save: "Save",
+  saving: "Saving…",
+  discard: "Discard",
+  saveFailed: "The deployment did not accept these values; they were left for you to correct.",
+  readOnly: "This deployment is read-only.",
   "message.reasoning": "Reasoning",
   "message.unknownBlock": "Unknown message block",
   "message.stopped": "Stopped",
@@ -59,15 +64,19 @@ const zh: Record<TtsLocaleKey, string> = {
   title: "Qwen 语音",
   description: "选择用于预取助手标记片段的声音。",
   voice: "声音",
+  voiceHint: "保存后，新片段将使用此声音。",
   apiKey: "DashScope API 密钥",
+  apiKeyHint: "输入新密钥以替换现有密钥。留空则保留现有密钥。",
   configured: "已配置",
-  source: "来源",
-  writable: "可写",
-  unavailable: "不可用",
-  save: "保存密钥",
-  remove: "移除密钥",
-  saved: "已保存",
-  failed: "无法保存此更改",
+  notConfigured: "未配置",
+  expand: "展开",
+  collapse: "收起",
+  unsaved: "未保存",
+  save: "保存",
+  saving: "保存中…",
+  discard: "放弃",
+  saveFailed: "本部署未接受这些值；已保留供你修改。",
+  readOnly: "此部署为只读。",
   "message.reasoning": "推理",
   "message.unknownBlock": "未知消息块",
   "message.stopped": "已停止",
@@ -80,8 +89,8 @@ const zh: Record<TtsLocaleKey, string> = {
 
 export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): TtsRpcClient {
   return {
-    async synthesize(text: string, signal?: AbortSignal): Promise<BrowserAudioPayload> {
-      const result = await connection.rpc.call(RPC_CHANNEL, RPC_ENDPOINT, { text }, signal);
+    async synthesize(text: string, sessionId = "", signal?: AbortSignal): Promise<BrowserAudioPayload> {
+      const result = await connection.rpc.call(RPC_CHANNEL, RPC_ENDPOINT, { text, sessionId }, signal);
       if (!result.ok) throw new Error(result.error.message);
       return result.value as BrowserAudioPayload;
     }
@@ -155,7 +164,7 @@ export function apply(ctx: ClientContext): void {
 }
 
 export { TtsAudioPlayer, TtsPlayer } from "./player.js";
-export { TtsSettingsCard, decodeSettings, describeCredential, saveCredential, removeCredential } from "./client/settings-card.js";
+export { TtsSettingsCard, decodeSettings, describeCredential, saveCredential } from "./client/settings-card.js";
 export { TtsAssistantNodeView, renderAssistantBlocks } from "./client/assistant-node.js";
 
 export default { inject, apply };

@@ -32,3 +32,13 @@ card does not promise credential or voice writes.
 The host gateway uses the fixed `qwen3-tts-flash` model, Chinese language, and
 MP3 output. It accepts only the short text payload sent by the browser's
 trusted Connection RPC.
+
+## Audio cache
+
+Each prepared passage is keyed by its normalized text, selected voice, model,
+and cache format, then written atomically as
+`.dsh/kepos-tts/audio/<sha256>.mp3` below the active session workspace. A
+refresh or remount resolves the session again and reuses that bounded artifact;
+the browser only receives a same-origin `/kepos-tts/audio/...` URL. The cache
+has no browsing, eviction, migration, or clear UI, and sessions without an
+absolute workspace are intentionally unavailable.

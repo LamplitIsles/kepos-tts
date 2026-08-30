@@ -9,20 +9,27 @@ describe("host plugin composition", () => {
     const handleCalls: unknown[][] = [];
     const sectionCalls: unknown[] = [];
     const registerCalls: unknown[][] = [];
+    const routeCalls: unknown[] = [];
     const handle = (...args: unknown[]) => { handleCalls.push(args); return async () => undefined; };
     const section = (value: unknown) => { sectionCalls.push(value); return () => undefined; };
     const register = (...args: unknown[]) => { registerCalls.push(args); return { get: () => ({ voice: "onoAnna" }) }; };
+    const webServer = { register: (route: unknown) => { routeCalls.push(route); return () => undefined; } };
+    const effect = (callback: () => (() => void)) => callback();
     apply({
       settings: { register },
       credentials: { resolve: async (ref: unknown) => ref === CREDENTIAL_REF ? { value: "secret", source: "test" } : undefined },
       connection: { rpc: { handle } },
-      systemPrompt: { section }
+      systemPrompt: { section },
+      sessions: { get: () => ({ header: { cwd: "/tmp" } }) },
+      webServer,
+      effect
     } as never);
     expect(name).toBe("kepos-tts");
-    expect(inject).toEqual(["connection", "credentials", "settings", "systemPrompt"]);
+    expect(inject).toEqual(["connection", "credentials", "settings", "systemPrompt", "sessions", "webServer"]);
     expect(registerCalls[0]).toEqual([SETTINGS_NAMESPACE, expect.anything(), { base: { voice: "onoAnna" }, applies: "live" }]);
     expect(sectionCalls[0]).toEqual(expect.objectContaining({ name: "kepos-tts:tagged-output", text: TTS_SYSTEM_PROMPT }));
     expect(handleCalls[0]).toEqual([RPC_CHANNEL, expect.any(Function), { authority: "trusted-host" }]);
+    expect(routeCalls[0]).toEqual(expect.objectContaining({ kind: "prefix", path: "/kepos-tts/audio", handler: expect.any(Function) }));
     const handler = handleCalls[0]![1] as (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>;
     expect(RPC_ENDPOINT).toBe("synthesize");
     return expect(handler("other", { text: "你好" }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { message: "invalid-input" } });

@@ -1,6 +1,6 @@
-import { createElement, useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { createElement, useEffect, useId, useState } from "react";
 import type { SettingsScope } from "@deepseek-ai/dsh-client-runtime/client";
+import { IconChevronDownOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
 
 import {
   CREDENTIAL_REF,
@@ -26,7 +26,6 @@ export interface CredentialApi {
   credentials: {
     describe(payload: { refs: string[] }, signal?: AbortSignal): Promise<unknown>;
     set(payload: { ref: string; value: string }, signal?: AbortSignal): Promise<unknown>;
-    unset(payload: { ref: string }, signal?: AbortSignal): Promise<unknown>;
   };
 }
 
@@ -40,15 +39,19 @@ export interface TtsSettingsCardProps {
     title: string;
     description: string;
     voice: string;
+    voiceHint: string;
     apiKey: string;
+    apiKeyHint: string;
     configured: string;
-    source: string;
-    writable: string;
-    unavailable: string;
+    notConfigured: string;
+    expand: string;
+    collapse: string;
+    unsaved: string;
     save: string;
-    remove: string;
-    saved: string;
-    failed: string;
+    saving: string;
+    discard: string;
+    saveFailed: string;
+    readOnly: string;
   }>;
 }
 
@@ -96,29 +99,27 @@ export async function saveCredential(api: CredentialApi, value: string): Promise
   }
 }
 
-export async function removeCredential(api: CredentialApi): Promise<void> {
-  const response = await api.credentials.unset({ ref: CREDENTIAL_REF });
-  const result = responseResult(response);
-  if (typeof result === "object" && result !== null && "ok" in result && (result as { ok?: unknown }).ok !== true) {
-    throw new Error("credential-rejected");
-  }
-}
-
 export function decodeSettings(value: unknown): Partial<QwenTtsSettings> {
   return { voice: normalizeSettings(value).voice };
 }
 
+/**
+ * A small feature-owned equivalent of DSH's PluginCard. The structure mirrors
+ * the native card: collapsed disclosure header, staged field rows, and one
+ * Save/Discard footer. Secrets are write-only and never read back.
+ */
 export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: TtsSettingsCardProps) {
-  const [snapshot, setSnapshot] = useState(scope.getSnapshot());
+  const snapshot = scope.getSnapshot();
+  const [current, setCurrent] = useState(snapshot);
   const [credential, setCredential] = useState<CredentialStatus>(DEFAULT_STATUS);
+  const [draftVoice, setDraftVoice] = useState<VoiceId | undefined>();
   const [draftKey, setDraftKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<"saved" | "failed">();
-  const voice = normalizeSettings(snapshot.value).voice;
-  const canWriteSettings = localOnly && snapshot.writable;
-  const canWrite = localOnly && credential.writable;
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const cardId = useId();
 
-  useEffect(() => scope.subscribe(() => setSnapshot(scope.getSnapshot())), [scope]);
+  useEffect(() => scope.subscribe(() => setCurrent(scope.getSnapshot())), [scope]);
   useEffect(() => {
     let active = true;
     void describeCredential(api).then((status) => {
@@ -129,121 +130,162 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     };
   }, [api]);
 
-  const selectVoice = async (event: { target: { value: string } }) => {
-    if (!canWriteSettings) return;
-    const next = (VOICE_IDS as readonly string[]).includes(event.target.value)
-      ? event.target.value as VoiceId
-      : DEFAULT_VOICE;
-    setBusy(true);
-    setFeedback(undefined);
-    try {
-      await scope.set("voice", next);
-      setFeedback("saved");
-    } catch {
-      setFeedback("failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveKey = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!draftKey.trim() || !canWrite) return;
-    setBusy(true);
-    setFeedback(undefined);
-    try {
-      await saveCredential(api, draftKey.trim());
-      setDraftKey("");
-      setCredential(await describeCredential(api));
-      setFeedback("saved");
-    } catch {
-      setFeedback("failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removeKey = async () => {
-    if (!credential.configured || !canWrite) return;
-    setBusy(true);
-    setFeedback(undefined);
-    try {
-      await removeCredential(api);
-      setCredential(await describeCredential(api));
-      setFeedback("saved");
-    } catch {
-      setFeedback("failed");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const voice = normalizeSettings(current.value).voice;
+  const selectedVoice = draftVoice ?? voice;
+  const canWriteSettings = localOnly && current.writable;
+  const canWriteCredential = localOnly && credential.writable;
+  const voiceDirty = draftVoice !== undefined && draftVoice !== voice;
+  const keyDirty = draftKey.trim() !== "";
+  const dirty = voiceDirty || keyDirty;
 
   const text = {
     title: t?.("title") ?? "Qwen voice",
     description: t?.("description") ?? "Choose the voice used to prepare tagged assistant passages.",
     voice: t?.("voice") ?? "Voice",
+    voiceHint: t?.("voiceHint") ?? "New passages use this voice after you save.",
     apiKey: t?.("apiKey") ?? "DashScope API key",
+    apiKeyHint: t?.("apiKeyHint") ?? "Enter a new key to replace the configured key. Leave blank to keep it.",
     configured: t?.("configured") ?? "Configured",
-    source: t?.("source") ?? "Source",
-    writable: t?.("writable") ?? "Writable",
-    unavailable: t?.("unavailable") ?? "Unavailable",
-    save: t?.("save") ?? "Save key",
-    remove: t?.("remove") ?? "Remove key",
-    saved: t?.("saved") ?? "Saved",
-    failed: t?.("failed") ?? "Could not save this change",
+    notConfigured: t?.("notConfigured") ?? "Not configured",
+    expand: t?.("expand") ?? "Expand",
+    collapse: t?.("collapse") ?? "Collapse",
+    unsaved: t?.("unsaved") ?? "Unsaved",
+    save: t?.("save") ?? "Save",
+    saving: t?.("saving") ?? "Saving…",
+    discard: t?.("discard") ?? "Discard",
+    saveFailed: t?.("saveFailed") ?? "The deployment did not accept these values; they were left for you to correct.",
+    readOnly: t?.("readOnly") ?? "This deployment is read-only.",
     ...labels
   };
-  const credentialState = credential.configured ? "yes" : "no";
+
+  // DSH's PluginCard is absent when its namespace is unavailable.
+  if (current.status !== "ready") return null;
+
+  const editVoice = (event: { target: { value: string } }) => {
+    if (!canWriteSettings || saving) return;
+    const next = (VOICE_IDS as readonly string[]).includes(event.target.value)
+      ? event.target.value as VoiceId
+      : DEFAULT_VOICE;
+    setDraftVoice(next === voice ? undefined : next);
+    setFailed(false);
+  };
+
+  const discard = () => {
+    if (saving) return;
+    setDraftVoice(undefined);
+    setDraftKey("");
+    setFailed(false);
+  };
+
+  const save = async () => {
+    if (!dirty || saving || !canWriteSettings && voiceDirty || !canWriteCredential && keyDirty) return;
+    setSaving(true);
+    setFailed(false);
+    let landed = true;
+    try {
+      if (voiceDirty && draftVoice !== undefined) await scope.set("voice", draftVoice);
+      if (keyDirty && canWriteCredential) {
+        await saveCredential(api, draftKey.trim());
+        setCredential(await describeCredential(api));
+      }
+    } catch {
+      landed = false;
+    }
+    setSaving(false);
+    if (landed) {
+      setDraftVoice(undefined);
+      setDraftKey("");
+    }
+    setFailed(!landed);
+  };
 
   return createElement(
-    "section",
-    { className: styles.settingsCard, "aria-labelledby": `${SETTINGS_NAMESPACE}-title` },
-    createElement("p", { className: styles.eyebrow }, "TAGGED SPEECH"),
-    createElement("h2", { className: styles.title, id: `${SETTINGS_NAMESPACE}-title` }, text.title),
-    createElement("p", { className: styles.description }, text.description),
+    "li",
+    { className: `${styles.settingsCard} ${open ? styles.settingsCardOpen : ""}`, "data-settings-card": SETTINGS_NAMESPACE },
     createElement(
-      "label",
-      { className: styles.label, htmlFor: `${SETTINGS_NAMESPACE}-voice` },
-      text.voice,
+      "button",
+      {
+        type: "button",
+        className: styles.settingsHeader,
+        "aria-expanded": open,
+        "aria-controls": `${cardId}-body`,
+        "aria-label": `${open ? text.collapse : text.expand}: ${text.title}`,
+        onClick: () => setOpen((value) => !value)
+      },
       createElement(
-        "select",
-        { id: `${SETTINGS_NAMESPACE}-voice`, className: styles.select, value: voice, onChange: selectVoice, disabled: busy || snapshot.status === "unavailable" || !canWriteSettings },
-        VOICE_IDS.map((id) => createElement("option", { key: id, value: id }, VOICE_LABELS[id]))
-      )
+        "span",
+        { className: styles.settingsHeadText },
+        createElement("span", { className: styles.settingsName }, text.title),
+        createElement("span", { className: styles.settingsDescription }, text.description)
+      ),
+      dirty ? createElement("span", { className: styles.settingsPending }, text.unsaved) : null,
+      createElement(IconChevronDownOutline14, {
+        className: `${styles.settingsChevron} ${open ? styles.settingsChevronOpen : ""}`
+      })
     ),
-    createElement(
-      "dl",
-      { className: styles.credentialStatus, "aria-label": text.apiKey },
-      createElement("dt", null, text.configured),
-      createElement("dd", { "data-configured": credentialState }, credential.configured ? "yes" : "no"),
-      createElement("dt", null, text.source),
-      createElement("dd", null, credential.source ?? "—"),
-      createElement("dt", null, text.writable),
-      createElement("dd", { "data-writable": canWrite ? "yes" : "no" }, canWrite ? "yes" : "no")
-    ),
-    canWrite
+    open
       ? createElement(
-        "form",
-        { className: styles.keyForm, onSubmit: saveKey },
-        createElement("label", { className: styles.label, htmlFor: `${SETTINGS_NAMESPACE}-key` }, text.apiKey),
-        createElement("input", {
-          id: `${SETTINGS_NAMESPACE}-key`,
-          className: styles.keyInput,
-          type: "password",
-          value: draftKey,
-          onChange: (event: { target: { value: string } }) => setDraftKey(event.target.value),
-          autoComplete: "new-password",
-          placeholder: "Enter a new key",
-          disabled: busy,
-          "aria-label": text.apiKey
-        }),
-        createElement("button", { className: styles.action, type: "submit", disabled: busy || !draftKey.trim() }, text.save),
-        credential.configured
-          ? createElement("button", { className: `${styles.action} ${styles.actionSecondary}`, type: "button", onClick: removeKey, disabled: busy }, text.remove)
-          : null
+        "div",
+        { className: styles.settingsBody, id: `${cardId}-body` },
+        !canWriteSettings ? createElement("p", { className: styles.settingsReadOnly, role: "status" }, text.readOnly) : null,
+        createElement(
+          "div",
+          { className: styles.settingsField },
+          createElement(
+            "div",
+            { className: styles.settingsFieldHead },
+            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-voice` }, text.voice)
+          ),
+          createElement(
+            "select",
+            {
+              id: `${cardId}-voice`,
+              className: styles.settingsSelect,
+              value: selectedVoice,
+              onChange: editVoice,
+              disabled: saving || !canWriteSettings,
+              "aria-describedby": `${cardId}-voice-hint`
+            },
+            VOICE_IDS.map((id) => createElement("option", { key: id, value: id }, VOICE_LABELS[id]))
+          ),
+          createElement("p", { className: styles.settingsHint, id: `${cardId}-voice-hint` }, text.voiceHint)
+        ),
+        createElement(
+          "div",
+          { className: styles.settingsField },
+          createElement(
+            "div",
+            { className: styles.settingsFieldHead },
+            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-key` }, text.apiKey),
+            createElement(
+              "span",
+              { className: credential.configured ? styles.settingsBadge : styles.settingsBadgeMuted, "data-configured": credential.configured ? "yes" : "no" },
+              credential.configured ? text.configured : text.notConfigured
+            )
+          ),
+          createElement("input", {
+            id: `${cardId}-key`,
+            className: styles.settingsInput,
+            type: "password",
+            autoComplete: "off",
+            value: draftKey,
+            disabled: saving || !canWriteCredential,
+            onChange: (event: { target: { value: string } }) => {
+              setDraftKey(event.target.value);
+              setFailed(false);
+            },
+            "aria-describedby": `${cardId}-key-hint`
+          }),
+          createElement("p", { className: styles.settingsHint, id: `${cardId}-key-hint` }, text.apiKeyHint)
+        ),
+        createElement(
+          "div",
+          { className: styles.settingsFooter },
+          failed ? createElement("p", { className: styles.settingsFailed, role: "status" }, text.saveFailed) : null,
+          createElement("button", { type: "button", className: styles.settingsDiscard, disabled: !dirty || saving, onClick: discard }, text.discard),
+          createElement("button", { type: "button", className: styles.settingsSave, disabled: !dirty || saving, onClick: () => void save() }, saving ? text.saving : text.save)
+        )
       )
-      : createElement("p", { className: styles.unavailable, role: "status" }, text.unavailable),
-    feedback === "saved" ? createElement("p", { className: styles.feedback, role: "status" }, text.saved) : null,
-    feedback === "failed" ? createElement("p", { className: styles.feedback, role: "alert" }, text.failed) : null
+      : null
   );
 }

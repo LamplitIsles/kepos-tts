@@ -1,12 +1,98 @@
 .settingsCard {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-module-platform);
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 14px;
-  padding: 18px;
-  display: grid;
-  gap: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  border-radius: 12px;
+  list-style: none;
+  transition: border-color .16s, background .16s;
 }
+
+.settingsCard:hover { border-color: var(--dsw-alias-label-dimmed); }
+.settingsCardOpen { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-label-dimmed); }
+.settingsHeader {
+  appearance: none;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  display: flex;
+}
+.settingsHeader:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+.settingsHeadText { flex-direction: column; flex: 1; gap: 4px; min-width: 0; display: flex; }
+.settingsName { color: var(--dsw-alias-label-primary); font-size: 15px; font-weight: 600; line-height: 1.4; }
+.settingsDescription { color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 1.5; }
+.settingsChevron { color: var(--dsw-alias-label-tertiary); flex: none; transition: transform .16s; }
+.settingsChevronOpen { transform: rotate(180deg); }
+.settingsPending {
+  white-space: nowrap;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  border-radius: 999px;
+  flex: none;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+}
+.settingsBody { border-top: 1px solid var(--dsw-alias-border-l2); margin: 0 16px; padding-bottom: 8px; }
+.settingsReadOnly { color: var(--dsw-alias-label-tertiary); margin: 12px 0 0; font-size: 12px; line-height: 1.5; }
+.settingsField { flex-direction: column; gap: 6px; padding: 12px 0; display: flex; }
+.settingsField + .settingsField { border-top: 1px solid var(--dsw-alias-border-l2); }
+.settingsFieldHead { align-items: center; gap: 8px; display: flex; }
+.settingsFieldLabel { min-width: 0; color: var(--dsw-alias-label-primary); flex: 1; font-size: 13px; font-weight: 500; line-height: 1.5; }
+.settingsBadge,
+.settingsBadgeMuted {
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 17px;
+}
+.settingsBadge { background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-weight: 500; }
+.settingsBadgeMuted { color: var(--dsw-alias-label-tertiary); }
+.settingsInput,
+.settingsSelect {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  height: 34px;
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settingsInput:focus-visible,
+.settingsSelect:focus-visible { border-color: var(--dsw-alias-brand-primary); outline: none; }
+.settingsInput:disabled,
+.settingsSelect:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.settingsHint { color: var(--dsw-alias-label-tertiary); margin: 0; font-size: 12px; line-height: 1.5; }
+.settingsFooter { border-top: 1px solid var(--dsw-alias-border-l2); justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 0 4px; display: flex; }
+.settingsFailed { min-width: 0; color: var(--dsw-alias-label-error); flex: 1; margin: 0; font-size: 12px; line-height: 1.5; }
+.settingsDiscard,
+.settingsSave {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settingsDiscard { border-color: var(--dsw-alias-border-l2); color: var(--dsw-alias-label-secondary); background: transparent; }
+.settingsDiscard:hover:not(:disabled) { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-label-dimmed); }
+.settingsSave { background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-layer-3); }
+.settingsDiscard:disabled,
+.settingsSave:disabled { opacity: .4; cursor: default; }
+.settingsDiscard:focus-visible,
+.settingsSave:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 
 /* Adapted from DSH 0.1.1-rc.2 AssistantMarkdown/ReasoningRow presentation. */
 .assistant {
@@ -110,72 +196,6 @@
   padding: 4px 0 4px 22px;
   font-size: 14px;
   line-height: 24px;
-}
-
-.eyebrow {
-  margin: 0;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  letter-spacing: .12em;
-}
-
-.title { margin: 0; font-size: 17px; }
-.description { margin: 0 0 6px; color: var(--dsw-alias-label-secondary); line-height: 1.45; }
-.label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
-
-.select,
-.keyInput {
-  color: inherit;
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  min-height: 36px;
-  padding: 0 10px;
-}
-
-.select:focus-visible,
-.keyInput:focus-visible,
-.action:focus-visible {
-  outline: 2px solid var(--dsw-alias-label-primary-bluish);
-  outline-offset: 2px;
-}
-
-.credentialStatus {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 5px 12px;
-  margin: 4px 0;
-  font-size: 12px;
-}
-
-.credentialStatus dt { color: var(--dsw-alias-label-secondary); }
-.credentialStatus dd { margin: 0; }
-.keyForm { display: grid; gap: 8px; }
-
-.action {
-  width: fit-content;
-  border: 0;
-  border-radius: 8px;
-  min-height: 32px;
-  padding: 0 12px;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-button-info-fill);
-  cursor: pointer;
-}
-
-.action:hover:not(:disabled) { filter: brightness(1.1); }
-.action:disabled { opacity: .55; cursor: not-allowed; }
-.actionSecondary {
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  border: 1px solid var(--dsw-alias-border-l2);
-}
-
-.unavailable,
-.feedback {
-  margin: 0;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
 }
 
 .player {

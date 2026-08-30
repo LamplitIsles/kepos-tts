@@ -164,6 +164,7 @@ function normalText(
 export interface RenderAssistantBlocksOptions {
   streaming: boolean;
   interrupted: boolean;
+  sessionId?: string | undefined;
   mentions?: unknown | undefined;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
@@ -192,6 +193,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
                 text: segment.text,
                 transcript: segment.transcript,
                 voiceKey: options.voiceKey!,
+                sessionId: options.sessionId,
                 client: options.client!,
                 labels: {
                   preparing: options.t("message.preparingAudio", { default: "Preparing audio…" }),
@@ -260,6 +262,7 @@ interface AssistantMarkdownProps {
   blocks: readonly AssistantBlock[];
   streaming: boolean;
   interrupted: boolean;
+  sessionId?: string | undefined;
   mentions?: unknown;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
@@ -272,6 +275,7 @@ function AssistantMarkdown({
   blocks,
   streaming,
   interrupted,
+  sessionId,
   mentions,
   t,
   client,
@@ -292,6 +296,7 @@ function AssistantMarkdown({
       renderAssistantBlocks(blocks, {
         streaming,
         interrupted,
+        sessionId,
         mentions,
         t,
         client,
@@ -324,6 +329,7 @@ export function TtsAssistantNodeView(props: AssistantProps) {
     blocks,
     streaming,
     interrupted,
+    sessionId: props.sessionId,
     mentions,
     t: props.t as unknown as (key: string, params?: Record<string, unknown>) => string,
     client: props.client,

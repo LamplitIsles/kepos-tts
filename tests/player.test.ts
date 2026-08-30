@@ -2,64 +2,115 @@ import { describe, expect, it } from "vitest";
 import { act, create } from "react-test-renderer";
 import { createElement } from "react";
 
-import { TtsAudioPlayer, TtsPlayer } from "../src/player.js";
+import { TtsAudioPlayer, TtsPlayer, clearTtsPreparationCache } from "../src/player.js";
 import type { BrowserAudioPayload } from "../src/gateway.js";
 
-const payload: BrowserAudioPayload = { mediaType: "audio/mpeg", data: "SUQz", bytes: 3 };
+const payload: BrowserAudioPayload = { mediaType: "audio/mpeg", url: "/kepos-tts/audio/a.mp3?sessionId=session-a", bytes: 3 };
 
 describe("tagged TTS player", () => {
   it("prefetches audio when the finalized message mounts and renders a native player", async () => {
     let calls = 0;
     let root: ReturnType<typeof create> | undefined;
+    const client = { synthesize: async (_text: string, sessionId?: string) => { calls += 1; expect(sessionId).toBe("session-a"); return payload; } };
+    clearTtsPreparationCache(client);
     await act(async () => {
       root = create(createElement(TtsAudioPlayer, {
         text: "你好",
+        transcript: "你好",
         voiceKey: "onoAnna",
-        client: { synthesize: async () => { calls += 1; return payload; } }
+        sessionId: "session-a",
+        client
       }));
+      await Promise.resolve();
       await Promise.resolve();
     });
     expect(calls).toBe(1);
     const audio = root!.root.findByType("audio");
     expect(audio.props.controls).toBe(true);
     expect(audio.props.preload).toBe("metadata");
+    expect(audio.props.src).toBe(payload.url);
     root!.unmount();
   });
 
-  it("prepares each text and voice only once", async () => {
+  it("shares successful and in-flight preparation by session, voice, and normalized text", async () => {
     let calls = 0;
-    const player = new TtsPlayer({ synthesize: async () => { calls += 1; return payload; } });
-    await player.prepare("你好", "onoAnna");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const client = {
+      synthesize: async () => {
+        calls += 1;
+        await held;
+        return payload;
+      }
+    };
+    clearTtsPreparationCache(client);
+    const one = new TtsPlayer(client);
+    const two = new TtsPlayer(client);
+    const first = one.prepare("  你好\n", "onoAnna", "session-a");
+    const second = two.prepare("你好", "onoAnna", "session-a");
+    await Promise.resolve();
+    await Promise.resolve();
     expect(calls).toBe(1);
-    expect(player.getSnapshot().status).toBe("ready");
-    expect(player.preparedUrl("你好", "onoAnna")).toBeTruthy();
-    await player.prepare("你好", "onoAnna");
-    expect(calls).toBe(1);
-    player.dispose();
+    release();
+    await Promise.all([first, second]);
+    expect(one.preparedUrl("你好", "onoAnna", "session-a")).toBe(payload.url);
+    expect(two.preparedUrl("你好", "onoAnna", "session-a")).toBe(payload.url);
+    one.dispose();
+    two.dispose();
   });
 
-  it("cancels a pending request when the message unmounts", async () => {
+  it("keeps shared generation alive after disposal and lets a later mount reuse it", async () => {
     let settle!: (value: BrowserAudioPayload) => void;
-    const player = new TtsPlayer({ synthesize: async () => new Promise<BrowserAudioPayload>((resolve) => { settle = resolve; }) });
-    const pending = player.prepare("稍等", "onoAnna");
-    expect(player.getSnapshot().status).toBe("loading");
-    player.dispose();
+    let calls = 0;
+    const client = { synthesize: async () => { calls += 1; return new Promise<BrowserAudioPayload>((resolve) => { settle = resolve; }); } };
+    clearTtsPreparationCache(client);
+    const first = new TtsPlayer(client);
+    const pending = first.prepare("稍等", "onoAnna", "session-a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    first.dispose();
     settle(payload);
     await pending;
-    expect(player.preparedUrl("稍等", "onoAnna")).toBeUndefined();
+    const second = new TtsPlayer(client);
+    await second.prepare("稍等", "onoAnna", "session-a");
+    expect(calls).toBe(1);
+    expect(second.preparedUrl("稍等", "onoAnna", "session-a")).toBe(payload.url);
+    second.dispose();
+  });
+
+  it("removes failed preparation so a later occurrence can retry", async () => {
+    let calls = 0;
+    const client = {
+      synthesize: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("unavailable");
+        return payload;
+      }
+    };
+    clearTtsPreparationCache(client);
+    const first = new TtsPlayer(client);
+    await first.prepare("重试", "onoAnna", "session-a");
+    expect(first.getSnapshot().status).toBe("error");
+    const second = new TtsPlayer(client);
+    await second.prepare("重试", "onoAnna", "session-a");
+    expect(calls).toBe(2);
+    expect(second.getSnapshot().status).toBe("ready");
+    first.dispose();
+    second.dispose();
   });
 
   it("keeps an already prepared player stable when the selected voice changes", async () => {
     let calls = 0;
     let root: ReturnType<typeof create> | undefined;
     const client = { synthesize: async () => { calls += 1; return payload; } };
+    clearTtsPreparationCache(client);
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "onoAnna", client }));
+      root = create(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "onoAnna", sessionId: "session-a", client }));
+      await Promise.resolve();
       await Promise.resolve();
     });
     const originalSrc = root!.root.findByType("audio").props.src;
     await act(async () => {
-      root!.update(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "maia", client }));
+      root!.update(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "maia", sessionId: "session-a", client }));
       await Promise.resolve();
     });
     expect(calls).toBe(1);
@@ -69,13 +120,17 @@ describe("tagged TTS player", () => {
 
   it("keeps the transcript visible when prefetching fails", async () => {
     let root: ReturnType<typeof create> | undefined;
+    const client = { synthesize: async () => { throw new Error("unavailable"); } };
+    clearTtsPreparationCache(client);
     await act(async () => {
       root = create(createElement(TtsAudioPlayer, {
         text: "你好",
         transcript: "你好（旁白）",
         voiceKey: "onoAnna",
-        client: { synthesize: async () => { throw new Error("unavailable"); } }
+        sessionId: "session-a",
+        client
       }));
+      await Promise.resolve();
       await Promise.resolve();
     });
     const player = root!.root.findByProps({ "data-tts-state": "error" });

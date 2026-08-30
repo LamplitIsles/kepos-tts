@@ -5,22 +5,22 @@ import { createElement, Fragment } from "react";
 import { renderAssistantBlocks } from "../src/client/assistant-node.js";
 import type { TtsRpcClient } from "../src/player.js";
 
-const client: TtsRpcClient = { synthesize: async () => ({ mediaType: "audio/mpeg", data: "SUQz", bytes: 3 }) };
+const client: TtsRpcClient = { synthesize: async () => ({ mediaType: "audio/mpeg", url: "/kepos-tts/audio/a.mp3?sessionId=session-a", bytes: 3 }) };
 const t = (key: string) => key;
 
 describe("assistant renderer seam", () => {
   it("interleaves one finalized audio player and leaves ordinary markdown rendered", () => {
     const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
       { kind: "text", text: "普通 [[tts:text]]你好[[/tts:text]]。" }
-    ], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna" })));
+    ], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna", sessionId: "session-a" })));
     expect(html).toContain('data-tts-state="idle"');
     expect(html).toContain("普通");
     expect(html).not.toContain("[[tts:text]]");
   });
 
   it("does not expose a control while streaming or for ordinary text", () => {
-    const streaming = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "[[tts:text]]稍后[[/tts:text]]" }], { streaming: true, interrupted: false, t, client, voiceKey: "onoAnna" })));
-    const ordinary = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "只是回答" }], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna" })));
+    const streaming = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "[[tts:text]]稍后[[/tts:text]]" }], { streaming: true, interrupted: false, t, client, voiceKey: "onoAnna", sessionId: "session-a" })));
+    const ordinary = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "只是回答" }], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna", sessionId: "session-a" })));
     expect(streaming).not.toContain("data-tts-state");
     expect(ordinary).not.toContain("data-tts-state");
   });
