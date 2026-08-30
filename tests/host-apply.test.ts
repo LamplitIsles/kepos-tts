@@ -10,7 +10,7 @@ describe("host plugin composition", () => {
     const sectionCalls: unknown[] = [];
     const registerCalls: unknown[][] = [];
     const routeCalls: unknown[] = [];
-    const warn = vi.fn();
+    const hostError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const handle = (...args: unknown[]) => { handleCalls.push(args); return async () => undefined; };
     const section = (value: unknown) => { sectionCalls.push(value); return () => undefined; };
     const register = (...args: unknown[]) => { registerCalls.push(args); return { get: () => ({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }) }; };
@@ -23,7 +23,6 @@ describe("host plugin composition", () => {
       systemPrompt: { section },
       sessions: { get: () => undefined },
       webServer,
-      logger: { warn },
       effect
     } as never);
     expect(name).toBe("kepos-tts");
@@ -36,6 +35,7 @@ describe("host plugin composition", () => {
     expect(RPC_ENDPOINT).toBe("synthesize");
     await expect(handler("other", { text: "你好" }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { message: "invalid-input" } });
     await expect(handler(RPC_ENDPOINT, { text: "你好", sessionId: "missing-session" }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { message: "unavailable" } });
-    expect(warn).toHaveBeenCalledWith("synthesis failed: %o", expect.objectContaining({ category: "unavailable" }));
+    expect(hostError).toHaveBeenCalledWith("[kepos-tts] synthesis failed", expect.objectContaining({ category: "unavailable" }));
+    hostError.mockRestore();
   });
 });
