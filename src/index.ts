@@ -2,12 +2,13 @@ import type { Context } from "@deepseek-ai/cordis";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 import {
-  DEFAULT_VOICE,
-  QwenTtsSettingsSchema,
+  DEFAULT_ALIBABA_VOICE,
+  DEFAULT_BYTEDANCE_VOICE,
+  DEFAULT_PROVIDER,
+  TtsSettingsSchema,
   SETTINGS_NAMESPACE,
-  normalizeSettings
 } from "./settings.js";
-import { QwenTtsGateway, registerTtsAudioRoute, registerTtsRpc, type SessionResolver } from "./gateway.js";
+import { TtsGateway, registerTtsAudioRoute, registerTtsRpc, type SessionResolver } from "./gateway.js";
 import { registerTtsPrompt } from "./prompt.js";
 
 export const name = "kepos-tts";
@@ -29,13 +30,21 @@ type HostContext = Context & {
 export function apply(ctx: HostContext): void {
   const settings = ctx.settings.register(
     settingsNamespace(SETTINGS_NAMESPACE),
-    QwenTtsSettingsSchema,
-    { base: { voice: DEFAULT_VOICE }, applies: "live" }
+    TtsSettingsSchema,
+    {
+      base: {
+        provider: DEFAULT_PROVIDER,
+        alibabaVoice: DEFAULT_ALIBABA_VOICE,
+        bytedanceVoice: DEFAULT_BYTEDANCE_VOICE
+      },
+      applies: "live"
+    }
   );
-  const gateway = new QwenTtsGateway({
+  const gateway = new TtsGateway({
     credentials: ctx.credentials,
     sessions: ctx.sessions,
-    getVoice: () => normalizeSettings(settings.get()).voice
+    getSettings: () => settings.get(),
+    onFailure: (failure) => console.error("[kepos-tts] synthesis failed", failure)
   });
   registerTtsRpc(ctx.connection.rpc, gateway);
   ctx.effect(() => registerTtsAudioRoute(ctx.webServer, ctx.sessions), "kepos-tts: audio route");
@@ -43,7 +52,7 @@ export function apply(ctx: HostContext): void {
 }
 
 export {
-  QwenTtsGateway,
+  TtsGateway,
   TtsGatewayError,
   registerTtsAudioRoute,
   registerTtsRpc,

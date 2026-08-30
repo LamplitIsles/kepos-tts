@@ -24,19 +24,19 @@ import styles from "./tts.module.dshcss";
 // markdown, reasoning, images, unknown blocks, interruption markers, and file
 // mentions intact while changing only finalized prose rendering.
 
-export interface VoiceSource {
-  getSnapshot(): string;
+export interface ProfileSource {
+  getSnapshot(): string | undefined;
   subscribe(listener: () => void): () => void;
 }
 
-const EMPTY_VOICE_SOURCE: VoiceSource = {
-  getSnapshot: () => "onoAnna",
+const EMPTY_PROFILE_SOURCE: ProfileSource = {
+  getSnapshot: () => undefined,
   subscribe: () => () => undefined
 };
 
 type AssistantProps = ChatNodeViewProps<"assistant-step"> & {
   client?: TtsRpcClient;
-  voiceSource?: VoiceSource;
+  profileSource?: ProfileSource;
 };
 
 type MarkdownCodeLabels = { copyLabel: string; copiedLabel: string };
@@ -168,7 +168,7 @@ export interface RenderAssistantBlocksOptions {
   mentions?: unknown | undefined;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
-  voiceKey?: string | undefined;
+  profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
   codeLabels?: MarkdownCodeLabels | undefined;
 }
@@ -182,7 +182,8 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
     const block = blocks[index];
     if (!block) continue;
     if (block.kind === "text") {
-      if (!options.streaming && !options.interrupted && !claimed && options.client && options.voiceKey) {
+      const profileKey = options.profileKey;
+      if (!options.streaming && !options.interrupted && !claimed && options.client) {
         const parsed = parseTaggedText(block.text);
         if (parsed.passage) {
           claimed = true;
@@ -192,7 +193,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
                 key: `${index}-tts`,
                 text: segment.text,
                 transcript: segment.transcript,
-                voiceKey: options.voiceKey!,
+                profileKey,
                 sessionId: options.sessionId,
                 client: options.client!,
                 labels: {
@@ -266,7 +267,7 @@ interface AssistantMarkdownProps {
   mentions?: unknown;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
-  voiceKey?: string | undefined;
+  profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
 }
 
@@ -279,7 +280,7 @@ function AssistantMarkdown({
   mentions,
   t,
   client,
-  voiceKey,
+  profileKey,
   renderMessageImages
 }: AssistantMarkdownProps): ReactNode {
   const codeLabels = useMemo(() => ({
@@ -300,7 +301,7 @@ function AssistantMarkdown({
         mentions,
         t,
         client,
-        voiceKey,
+        profileKey,
         codeLabels,
         renderMessageImages
       })
@@ -310,8 +311,8 @@ function AssistantMarkdown({
 
 export function TtsAssistantNodeView(props: AssistantProps) {
   const data = props.node.data;
-  const source = props.voiceSource ?? EMPTY_VOICE_SOURCE;
-  const voiceKey = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
+  const source = props.profileSource ?? EMPTY_PROFILE_SOURCE;
+  const profileKey = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
   const blocks = data.blocks ?? [];
   const streaming = data.status === "running";
   const interrupted = data.status === "interrupted";
@@ -333,7 +334,7 @@ export function TtsAssistantNodeView(props: AssistantProps) {
     mentions,
     t: props.t as unknown as (key: string, params?: Record<string, unknown>) => string,
     client: props.client,
-    voiceKey,
+    profileKey,
     renderMessageImages: props.renderMessageImages
   });
 }

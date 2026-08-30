@@ -19,7 +19,8 @@ export interface TtsRpcClient {
 export interface TtsAudioPlayerProps {
   text: string;
   transcript?: string;
-  voiceKey: string;
+  /** Secret-free normalized provider profile identity from a ready Host Settings snapshot. */
+  profileKey?: string | undefined;
   /** Framework-provided session identity used by the Host to resolve cwd. */
   sessionId: string;
   client: TtsRpcClient;
@@ -48,8 +49,8 @@ function cacheFor(client: TtsRpcClient): Map<string, PreparationEntry> {
   return cache;
 }
 
-function preparationKey(text: string, voiceKey: string, sessionId: string): string {
-  return JSON.stringify([sessionId, voiceKey, normalizeTtsText(text)]);
+function preparationKey(text: string, profileKey: string | undefined, sessionId: string): string {
+  return JSON.stringify([sessionId, profileKey ?? null, normalizeTtsText(text)]);
 }
 
 function validPayload(payload: BrowserAudioPayload): BrowserAudioPayload {
@@ -64,7 +65,7 @@ export function clearTtsPreparationCache(client?: TtsRpcClient): void {
   if (client) preparationCaches.delete(client as object);
 }
 
-/** Fetches tagged speech immediately while sharing page-level work by session/text/voice. */
+/** Fetches tagged speech immediately while sharing page-level work by session/text/profile. */
 export class TtsPlayer {
   private snapshot: TtsPlayerSnapshot = { status: "idle" };
   private readonly listeners = new Set<() => void>();
@@ -87,12 +88,12 @@ export class TtsPlayer {
     for (const listener of this.listeners) listener();
   }
 
-  hasCached(text: string, voiceKey: string, sessionId: string): boolean {
-    return this.cached?.key === preparationKey(text, voiceKey, sessionId);
+  hasCached(text: string, profileKey: string | undefined, sessionId: string): boolean {
+    return this.cached?.key === preparationKey(text, profileKey, sessionId);
   }
 
-  preparedUrl(text: string, voiceKey: string, sessionId: string): string | undefined {
-    return this.hasCached(text, voiceKey, sessionId) ? this.cached?.url : undefined;
+  preparedUrl(text: string, profileKey: string | undefined, sessionId: string): string | undefined {
+    return this.hasCached(text, profileKey, sessionId) ? this.cached?.url : undefined;
   }
 
   /** Forget a stale workspace URL when the browser cannot load its media. */
@@ -104,9 +105,9 @@ export class TtsPlayer {
   }
 
   /** Seed a remounted player from resolved page memory without publishing a new state cycle. */
-  hydrate(text: string, voiceKey: string, sessionId: string): boolean {
-    if (this.disposed) return false;
-    const key = preparationKey(text, voiceKey, sessionId);
+  hydrate(text: string, profileKey: string | undefined, sessionId: string): boolean {
+    if (this.disposed || profileKey === undefined) return false;
+    const key = preparationKey(text, profileKey, sessionId);
     const payload = cacheFor(this.client).get(key)?.payload;
     if (!payload) return false;
     this.currentKey = key;
@@ -115,10 +116,10 @@ export class TtsPlayer {
     return true;
   }
 
-  async prepare(text: string, voiceKey: string, sessionId: string): Promise<void> {
+  async prepare(text: string, profileKey: string | undefined, sessionId: string): Promise<void> {
     if (this.disposed) return;
     const normalized = normalizeTtsText(text);
-    const key = preparationKey(normalized, voiceKey, sessionId);
+    const key = preparationKey(normalized, profileKey, sessionId);
     const generation = ++this.generation;
     this.currentKey = key;
     if (this.cached?.key === key) {
@@ -126,8 +127,9 @@ export class TtsPlayer {
       return;
     }
 
-    const cache = cacheFor(this.client);
-    let entry = cache.get(key);
+    const shared = profileKey !== undefined;
+    const cache = shared ? cacheFor(this.client) : undefined;
+    let entry = cache?.get(key);
     if (!entry) {
       const controller = new AbortController();
       const promise = Promise.resolve()
@@ -135,15 +137,17 @@ export class TtsPlayer {
         .then(validPayload);
       const created: PreparationEntry = { promise };
       entry = created;
-      cache.set(key, created);
-      promise.then(
-        (payload) => {
-          if (cache.get(key) === created) created.payload = payload;
-        },
-        () => {
-          if (cache.get(key) === created) cache.delete(key);
-        }
-      );
+      if (cache) {
+        cache.set(key, created);
+        promise.then(
+          (payload) => {
+            if (cache.get(key) === created) created.payload = payload;
+          },
+          () => {
+            if (cache.get(key) === created) cache.delete(key);
+          }
+        );
+      }
     }
 
     this.publish({ status: "loading" });
@@ -172,7 +176,7 @@ export class TtsPlayer {
 export function TtsAudioPlayer({
   text,
   transcript = text,
-  voiceKey,
+  profileKey,
   sessionId,
   client,
   labels,
@@ -181,20 +185,20 @@ export function TtsAudioPlayer({
   const playerRef = useRef<TtsPlayer | null>(null);
   if (!playerRef.current) {
     const player = new TtsPlayer(client);
-    player.hydrate(text, voiceKey, sessionId);
+    player.hydrate(text, profileKey, sessionId);
     playerRef.current = player;
   }
   const player = playerRef.current;
-  const preparationRef = useRef<{ text: string; voiceKey: string; sessionId: string } | null>(null);
-  if (!preparationRef.current) preparationRef.current = { text, voiceKey, sessionId };
+  const preparationRef = useRef<{ text: string; profileKey: string | undefined; sessionId: string } | null>(null);
+  if (!preparationRef.current) preparationRef.current = { text, profileKey, sessionId };
   const preparation = preparationRef.current;
   const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot, player.getSnapshot);
   useEffect(() => {
-    void player.prepare(preparation.text, preparation.voiceKey, preparation.sessionId);
+    void player.prepare(preparation.text, preparation.profileKey, preparation.sessionId);
   }, [player, preparation]);
   useEffect(() => () => player.dispose(), [player]);
 
-  const src = player.preparedUrl(preparation.text, preparation.voiceKey, preparation.sessionId);
+  const src = player.preparedUrl(preparation.text, preparation.profileKey, preparation.sessionId);
   const classes = [styles.player, className].filter(Boolean).join(" ");
   if (snapshot.status === "ready" && src) {
     return createElement(
