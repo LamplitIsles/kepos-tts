@@ -34,8 +34,8 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 }
 
 const en: Record<TtsLocaleKey, string> = {
-  title: "Tagged speech",
-  description: "Choose the provider and voice used to prepare tagged assistant passages.",
+  title: "Speech synthesis",
+  description: "Choose the provider and voice used to synthesize tagged assistant passages.",
   provider: "Provider",
   providerHint: "New passages use this provider after you save.",
   voice: "Voice ID",

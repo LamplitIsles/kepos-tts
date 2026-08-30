@@ -240,8 +240,8 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const canSave = dirty && !saving && canWriteSettings && !credentialBlocked && !invalidVoice;
 
   const text = {
-    title: t?.("title") ?? "Tagged speech",
-    description: t?.("description") ?? "Choose the provider and voice used for tagged assistant passages.",
+    title: t?.("title") ?? "Speech synthesis",
+    description: t?.("description") ?? "Choose the provider and voice used to synthesize tagged assistant passages.",
     provider: t?.("provider") ?? "Provider",
     providerHint: t?.("providerHint") ?? "New passages use this provider after you save.",
     voice: t?.("voice") ?? "Voice ID",

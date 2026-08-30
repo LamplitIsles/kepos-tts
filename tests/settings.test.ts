@@ -58,7 +58,7 @@ describe("dual-provider native settings card", () => {
     expect(decodeSettings({ provider: "nope", alibabaVoice: "", bytedanceVoice: "x".repeat(129) })).toEqual({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     const html = renderToStaticMarkup(createElement(TtsSettingsCard, { scope: controlledScope().settings, api: apiFor() }));
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("Tagged speech");
+    expect(html).toContain("Speech synthesis");
     expect(html).not.toContain("<dl");
   });
 
