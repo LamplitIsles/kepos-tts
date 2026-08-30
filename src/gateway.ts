@@ -47,13 +47,10 @@ export interface TtsFailureDiagnostic {
   voice?: string;
   stage?: "session" | "credential" | "network" | "http" | "provider-response";
   httpStatus?: number;
-  upstreamCode?: string | number;
-  upstreamMessage?: string;
   responseContentType?: string;
   responseBytes?: number;
   requestId?: string;
-  responsePrefixHex?: string;
-  responseFrameIssue?: string;
+  responseIssue?: "read-failed" | "invalid-json" | "invalid-frame" | "no-data-frames";
 }
 
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
@@ -101,19 +98,10 @@ export class TtsGatewayError extends Error {
   }
 }
 
-function safeUpstreamMessage(message: string | undefined, sensitive: readonly string[]): string | undefined {
-  if (!message) return undefined;
-  let safe = message;
-  for (const value of sensitive) {
-    if (value) safe = safe.split(value).join("<redacted>");
-  }
-  return safe.slice(0, 512);
-}
-
 function providerDiagnostic(
   profile: Pick<TtsProfile, "provider" | "voice">,
   stage: NonNullable<TtsFailureDiagnostic["stage"]>,
-  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId" | "responsePrefixHex" | "responseFrameIssue"> = {}
+  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
 ): Omit<TtsFailureDiagnostic, "category"> {
   return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
@@ -173,28 +161,6 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
   return bytes;
 }
 
-function upstreamFailure(value: unknown): { code?: string | number; message?: string } {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const record = value as Record<string, unknown>;
-  const header = typeof record.header === "object" && record.header !== null && !Array.isArray(record.header)
-    ? record.header as Record<string, unknown>
-    : undefined;
-  const code = typeof record.code === "string" || typeof record.code === "number"
-    ? record.code
-    : typeof header?.code === "string" || typeof header?.code === "number"
-      ? header.code
-      : undefined;
-  const message = typeof record.message === "string"
-    ? record.message
-    : typeof header?.message === "string"
-      ? header.message
-      : undefined;
-  return {
-    ...(code === undefined ? {} : { code }),
-    ...(message === undefined ? {} : { message })
-  };
-}
-
 function responseDiagnostic(response: Response, responseBytes?: number): Pick<TtsFailureDiagnostic, "responseContentType" | "responseBytes" | "requestId"> {
   const responseContentType = response.headers.get("content-type")?.slice(0, 128);
   const requestId = (
@@ -209,30 +175,20 @@ function responseDiagnostic(response: Response, responseBytes?: number): Pick<Tt
   };
 }
 
-function bytePrefixHex(bytes: Uint8Array, maxBytes = 24): string {
-  return Array.from(bytes.subarray(0, maxBytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 async function httpProviderRejection(
   response: Response,
-  profile: Pick<TtsProfile, "provider" | "voice">,
-  sensitive: readonly string[]
+  profile: Pick<TtsProfile, "provider" | "voice">
 ): Promise<TtsGatewayError> {
-  let upstream: ReturnType<typeof upstreamFailure> = {};
   let responseBytes: number | undefined;
   try {
     const body = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
     responseBytes = body.byteLength;
-    upstream = upstreamFailure(JSON.parse(new TextDecoder().decode(body)));
   } catch {
-    // The HTTP status still provides a safe diagnostic when the body is absent or malformed.
+    // The HTTP status still provides a safe diagnostic when the body is absent or oversized.
   }
-  const safeMessage = safeUpstreamMessage(upstream.message, sensitive);
   return new TtsGatewayError("provider-rejected", providerDiagnostic(profile, "http", {
     httpStatus: response.status,
-    ...responseDiagnostic(response, responseBytes),
-    ...(upstream.code === undefined ? {} : { upstreamCode: upstream.code }),
-    ...(safeMessage === undefined ? {} : { upstreamMessage: safeMessage })
+    ...responseDiagnostic(response, responseBytes)
   }));
 }
 
@@ -318,7 +274,7 @@ async function alibabaBytes(
   } catch {
     throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "alibaba", voice }, "network"));
   }
-  if (!response.ok) throw await httpProviderRejection(response, { provider: "alibaba", voice }, [credential.value, text]);
+  if (!response.ok) throw await httpProviderRejection(response, { provider: "alibaba", voice });
 
   let body: unknown;
   let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
@@ -353,10 +309,14 @@ async function alibabaBytes(
 }
 
 interface ByteDanceFrame {
-  code?: number;
+  code: number;
   data?: string;
-  message?: string;
 }
+
+type ByteDanceResponseIssue = NonNullable<TtsFailureDiagnostic["responseIssue"]>;
+type ByteDanceFrameResult =
+  | { ok: true; frames: ByteDanceFrame[] }
+  | { ok: false; issue: Exclude<ByteDanceResponseIssue, "read-failed"> };
 
 function asFrame(value: unknown): ByteDanceFrame | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -371,111 +331,33 @@ function asFrame(value: unknown): ByteDanceFrame | undefined {
   if (header && "message" in header && typeof header.message !== "string") return undefined;
   const code = typeof record.code === "number" ? record.code : typeof header?.code === "number" ? header.code : undefined;
   const data = typeof record.data === "string" ? record.data : undefined;
-  const message = typeof record.message === "string" ? record.message : typeof header?.message === "string" ? header.message : undefined;
-  if (code === undefined && data === undefined && message === undefined) return undefined;
-  return { ...(code === undefined ? {} : { code }), ...(data === undefined ? {} : { data }), ...(message === undefined ? {} : { message }) };
+  if (code === undefined) return undefined;
+  return { code, ...(data === undefined ? {} : { data }) };
 }
 
-function parseAdjacentJsonFrames(text: string): ByteDanceFrame[] | undefined {
+/** Parse the domestic one-shot endpoint's SSE `data:` frames. */
+function parseByteDanceFrames(text: string): ByteDanceFrameResult {
   const frames: ByteDanceFrame[] = [];
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]!;
-    if (depth === 0) {
-      if (/\s/u.test(character)) continue;
-      if (character !== "{") return undefined;
-      start = index;
-      depth = 1;
-      continue;
-    }
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-    if (character === '"') {
-      inString = true;
-      continue;
-    }
-    if (character === "{") depth += 1;
-    if (character !== "}") continue;
-    depth -= 1;
-    if (depth !== 0) continue;
-    try {
-      const frame = asFrame(JSON.parse(text.slice(start, index + 1)));
-      if (!frame) return undefined;
-      frames.push(frame);
-    } catch {
-      return undefined;
-    }
-  }
-
-  return depth === 0 && !inString && frames.length > 0 ? frames : undefined;
-}
-
-/** Parse adjacent or newline JSON objects and SSE `data:` frames. */
-export function parseByteDanceFrames(text: string): ByteDanceFrame[] | undefined {
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  const adjacent = parseAdjacentJsonFrames(trimmed);
-  if (adjacent) return adjacent;
-  const frames: ByteDanceFrame[] = [];
-  for (const line of trimmed.split(/\r?\n/)) {
+  let sawData = false;
+  for (const line of text.split(/\r?\n/)) {
     const item = line.trim();
     if (!item) continue;
     if (item.startsWith(":") || item.startsWith("event:") || item.startsWith("id:") || item.startsWith("retry:")) continue;
-    const json = item.startsWith("data:") ? item.slice("data:".length).trim() : item;
-    if (!json || json === "[DONE]") continue;
-    try {
-      const frame = asFrame(JSON.parse(json));
-      if (!frame) return undefined;
-      frames.push(frame);
-    } catch {
-      return undefined;
-    }
-  }
-  return frames.length > 0 ? frames : undefined;
-}
-
-function valueType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
-
-function describeByteDanceFrameIssue(text: string): string {
-  const lines = text.trim().split(/\r?\n/);
-  let sawData = false;
-  for (let index = 0; index < lines.length; index += 1) {
-    const item = lines[index]!.trim();
-    if (!item || item.startsWith(":") || item.startsWith("event:") || item.startsWith("id:") || item.startsWith("retry:")) continue;
-    const json = item.startsWith("data:") ? item.slice("data:".length).trim() : item;
+    if (!item.startsWith("data:")) return { ok: false, issue: "invalid-frame" };
+    const json = item.slice("data:".length).trim();
     if (!json || json === "[DONE]") continue;
     sawData = true;
-    let value: unknown;
     try {
-      value = JSON.parse(json);
-    } catch (error) {
-      const position = error instanceof SyntaxError
-        ? error.message.match(/position (\d+)/)?.[1]
-        : undefined;
-      return `line=${index + 1} invalid-json position=${position ?? "unknown"}`;
+      const frame = asFrame(JSON.parse(json));
+      if (!frame) return { ok: false, issue: "invalid-frame" };
+      frames.push(frame);
+    } catch {
+      return { ok: false, issue: "invalid-json" };
     }
-    if (asFrame(value)) continue;
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return `line=${index + 1} invalid-frame type=${valueType(value)}`;
-    }
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
-    const types = keys.map((key) => `${key}:${valueType(record[key])}`);
-    return `line=${index + 1} invalid-frame keys=${keys.join(",")} types=${types.join(",")}`;
   }
-  return sawData ? "unknown" : "no-data-frames";
+  return frames.length > 0
+    ? { ok: true, frames }
+    : { ok: false, issue: sawData ? "invalid-frame" : "no-data-frames" };
 }
 
 async function bytedanceBytes(
@@ -506,35 +388,26 @@ async function bytedanceBytes(
   } catch {
     throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "bytedance", voice }, "network"));
   }
-  if (!response.ok) throw await httpProviderRejection(response, { provider: "bytedance", voice }, [credential.value, text]);
+  if (!response.ok) throw await httpProviderRejection(response, { provider: "bytedance", voice });
 
-  let frames: ByteDanceFrame[] | undefined;
+  let parsed: ByteDanceFrameResult | { ok: false; issue: "read-failed" };
   let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
-  let responsePrefixHex: string | undefined;
-  let responseFrameIssue: string | undefined;
   try {
     const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
     responseMeta = responseDiagnostic(response, encoded.byteLength);
-    responsePrefixHex = bytePrefixHex(encoded);
-    const decoded = new TextDecoder().decode(encoded);
-    frames = parseByteDanceFrames(decoded);
-    if (!frames) responseFrameIssue = describeByteDanceFrameIssue(decoded);
+    parsed = parseByteDanceFrames(new TextDecoder().decode(encoded));
   } catch {
-    frames = undefined;
+    parsed = { ok: false, issue: "read-failed" };
   }
-  if (!frames) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic(
+  if (!parsed.ok) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic(
     { provider: "bytedance", voice },
     "provider-response",
-    {
-      ...responseMeta,
-      ...(responsePrefixHex === undefined ? {} : { responsePrefixHex }),
-      ...(responseFrameIssue === undefined ? {} : { responseFrameIssue })
-    }
+    { ...responseMeta, responseIssue: parsed.issue }
   ));
 
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (const frame of frames) {
+  for (const frame of parsed.frames) {
     if (frame.code === 0) {
       if (frame.data !== undefined) {
         const bytes = base64ToBytes(frame.data);
@@ -549,15 +422,10 @@ async function bytedanceBytes(
       continue;
     }
     if (frame.code === 20_000_000) continue;
-    const safeMessage = safeUpstreamMessage(frame.message, [credential.value, text]);
     throw new TtsGatewayError("provider-rejected", providerDiagnostic(
       { provider: "bytedance", voice },
       "provider-response",
-      {
-        ...responseMeta,
-        ...(frame.code === undefined ? {} : { upstreamCode: frame.code }),
-        ...(safeMessage === undefined ? {} : { upstreamMessage: safeMessage })
-      }
+      responseMeta
     ));
   }
   if (total === 0) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));

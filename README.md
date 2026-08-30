@@ -33,7 +33,7 @@ unavailable or memory-backed Settings scope does not render this card; only a
 ready non-writable Host scope shows it read-only.
 
 Alibaba uses Qwen3-TTS Flash with Chinese MP3 output. ByteDance uses the
-domestic Volcengine V3 `seed-tts-2.0` unidirectional endpoint with MP3 at 24
+domestic Volcengine V3 `seed-tts-2.0` one-shot SSE endpoint with MP3 at 24
 kHz. The host accepts only the finalized passage and framework session identity
 sent by the browser's trusted Connection RPC; provider and voice are never
 message overrides.
