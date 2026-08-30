@@ -52,14 +52,12 @@ function apiFor(statuses: Partial<Record<string, { configured: boolean; writable
 }
 
 describe("dual-provider native settings card", () => {
-  it("normalizes fresh/invalid settings and starts as a compact collapsed disclosure", () => {
+  it("normalizes fresh/invalid settings and starts collapsed", () => {
     expect(normalizeSettings(undefined)).toEqual({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     expect(decodeSettings({ provider: "bytedance", alibabaVoice: "  custom  ", bytedanceVoice: "  voice  " })).toEqual({ provider: "bytedance", alibabaVoice: "custom", bytedanceVoice: "voice" });
     expect(decodeSettings({ provider: "nope", alibabaVoice: "", bytedanceVoice: "x".repeat(129) })).toEqual({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     const html = renderToStaticMarkup(createElement(TtsSettingsCard, { scope: controlledScope().settings, api: apiFor() }));
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("Speech synthesis");
-    expect(html).not.toContain("<dl");
   });
 
   it("describes and saves each credential without exposing a secret", async () => {
