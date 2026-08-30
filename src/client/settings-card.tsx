@@ -3,18 +3,22 @@ import type { SettingsScope } from "@deepseek-ai/dsh-client-runtime/client";
 import { IconChevronDownOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
 
 import {
-  CREDENTIAL_REF,
-  DEFAULT_VOICE,
+  ALIBABA_CREDENTIAL_REF,
+  BYTEDANCE_CREDENTIAL_REF,
+  DEFAULT_ALIBABA_VOICE,
+  DEFAULT_BYTEDANCE_VOICE,
   SETTINGS_NAMESPACE,
-  VOICE_IDS,
-  VOICE_LABELS,
+  TTS_PROVIDERS,
+  VOICE_ID_MAX_LENGTH,
+  normalizeProvider,
   normalizeSettings,
-  type QwenTtsSettings,
-  type VoiceId
+  normalizeVoiceId,
+  type TtsProvider,
+  type TtsSettings
 } from "../constants.js";
 import styles from "./tts.module.dshcss";
 
-export type ClientSettingsScope = SettingsScope<Partial<QwenTtsSettings>>;
+export type ClientSettingsScope = SettingsScope<Partial<TtsSettings>>;
 
 export interface CredentialStatus {
   configured: boolean;
@@ -38,6 +42,8 @@ export interface TtsSettingsCardProps {
   labels?: Partial<{
     title: string;
     description: string;
+    provider: string;
+    providerHint: string;
     voice: string;
     voiceHint: string;
     apiKey: string;
@@ -52,10 +58,29 @@ export interface TtsSettingsCardProps {
     discard: string;
     saveFailed: string;
     readOnly: string;
+    voiceRequired: string;
+    voiceTooLong: string;
   }>;
 }
 
 const DEFAULT_STATUS: CredentialStatus = { configured: false, writable: false };
+const DEFAULT_STATUSES: Record<TtsProvider, CredentialStatus> = {
+  alibaba: DEFAULT_STATUS,
+  bytedance: DEFAULT_STATUS
+};
+const EMPTY_DRAFT_KEYS: Record<TtsProvider, string> = { alibaba: "", bytedance: "" };
+
+function credentialRefFor(provider: TtsProvider): string {
+  return provider === "bytedance" ? BYTEDANCE_CREDENTIAL_REF : ALIBABA_CREDENTIAL_REF;
+}
+
+function voiceFieldFor(provider: TtsProvider): "alibabaVoice" | "bytedanceVoice" {
+  return provider === "bytedance" ? "bytedanceVoice" : "alibabaVoice";
+}
+
+function defaultVoiceFor(provider: TtsProvider): string {
+  return provider === "bytedance" ? DEFAULT_BYTEDANCE_VOICE : DEFAULT_ALIBABA_VOICE;
+}
 
 function responseResult(response: unknown): unknown {
   if (typeof response === "object" && response !== null && "result" in response) {
@@ -73,14 +98,20 @@ function resultValue(response: unknown): unknown {
   return result;
 }
 
-export async function describeCredential(api: CredentialApi): Promise<CredentialStatus> {
+function credentialView(value: unknown, ref: string): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!("credentials" in value)) return value;
+  const credentials = (value as { credentials?: unknown }).credentials;
+  return typeof credentials === "object" && credentials !== null
+    ? (credentials as Record<string, unknown>)[ref]
+    : undefined;
+}
+
+export async function describeCredential(api: CredentialApi, ref = ALIBABA_CREDENTIAL_REF): Promise<CredentialStatus> {
   try {
-    const value = resultValue(await api.credentials.describe({ refs: [CREDENTIAL_REF] }));
-    const candidate = typeof value === "object" && value !== null && "credentials" in value
-      ? (value as { credentials?: Record<string, unknown> }).credentials?.[CREDENTIAL_REF]
-      : value;
-    if (typeof candidate !== "object" || candidate === null) return DEFAULT_STATUS;
-    const info = candidate as { configured?: unknown; source?: unknown; writable?: unknown };
+    const value = credentialView(resultValue(await api.credentials.describe({ refs: [ref] })), ref);
+    if (typeof value !== "object" || value === null) return DEFAULT_STATUS;
+    const info = value as { configured?: unknown; source?: unknown; writable?: unknown };
     return {
       configured: info.configured === true,
       ...(typeof info.source === "string" && info.source ? { source: info.source } : {}),
@@ -91,59 +122,98 @@ export async function describeCredential(api: CredentialApi): Promise<Credential
   }
 }
 
-export async function saveCredential(api: CredentialApi, value: string): Promise<void> {
-  const response = await api.credentials.set({ ref: CREDENTIAL_REF, value });
+export async function saveCredential(api: CredentialApi, value: string, ref = ALIBABA_CREDENTIAL_REF): Promise<void> {
+  const response = await api.credentials.set({ ref, value });
   const result = responseResult(response);
   if (typeof result === "object" && result !== null && "ok" in result && (result as { ok?: unknown }).ok !== true) {
     throw new Error("credential-rejected");
   }
 }
 
-export function decodeSettings(value: unknown): Partial<QwenTtsSettings> {
-  return { voice: normalizeSettings(value).voice };
+export function decodeSettings(value: unknown): Partial<TtsSettings> {
+  return normalizeSettings(value);
+}
+
+function validateVoiceDraft(value: string | undefined, fallback: string): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  if (!normalized) return "required";
+  if (Array.from(normalized).length > VOICE_ID_MAX_LENGTH) return "too-long";
+  // Calling the shared normalizer here keeps the UI and host profile rules in
+  // lockstep while retaining the raw draft in the input.
+  if (normalizeVoiceId(value, fallback) !== normalized) return "invalid";
+  return undefined;
 }
 
 /**
- * A small feature-owned equivalent of DSH's PluginCard. The structure mirrors
- * the native card: collapsed disclosure header, staged field rows, and one
- * Save/Discard footer. Secrets are write-only and never read back.
+ * A compact DSH-native disclosure card with durable baseline/draft semantics.
+ * Secrets are write-only and never read back.
  */
 export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: TtsSettingsCardProps) {
-  const snapshot = scope.getSnapshot();
-  const [current, setCurrent] = useState(snapshot);
-  const [credential, setCredential] = useState<CredentialStatus>(DEFAULT_STATUS);
-  const [draftVoice, setDraftVoice] = useState<VoiceId | undefined>();
-  const [draftKey, setDraftKey] = useState("");
+  const initialSnapshot = scope.getSnapshot();
+  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [baseline, setBaseline] = useState<TtsSettings>(() => normalizeSettings(initialSnapshot.value));
+  const [draftProvider, setDraftProvider] = useState<TtsProvider | undefined>();
+  const [draftVoices, setDraftVoices] = useState<Partial<Record<TtsProvider, string>>>({});
+  const [draftKeys, setDraftKeys] = useState<Record<TtsProvider, string>>(EMPTY_DRAFT_KEYS);
+  const [credentials, setCredentials] = useState<Record<TtsProvider, CredentialStatus>>(DEFAULT_STATUSES);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const cardId = useId();
 
-  useEffect(() => scope.subscribe(() => setCurrent(scope.getSnapshot())), [scope]);
+  useEffect(() => scope.subscribe(() => {
+    const next = scope.getSnapshot();
+    setSnapshot(next);
+    // Always advance the saved baseline. Drafts intentionally live in their
+    // own maps, so refreshes and revision recovery cannot erase them.
+    setBaseline(normalizeSettings(next.value));
+  }), [scope]);
+
   useEffect(() => {
     let active = true;
-    void describeCredential(api).then((status) => {
-      if (active) setCredential(status);
-    });
+    void Promise.all(TTS_PROVIDERS.map(async (provider) => [provider, await describeCredential(api, credentialRefFor(provider))] as const))
+      .then((entries) => {
+        if (!active) return;
+        setCredentials((current) => {
+          const next = { ...current };
+          for (const [provider, status] of entries) next[provider] = status;
+          return next;
+        });
+      });
     return () => {
       active = false;
     };
   }, [api]);
 
-  const voice = normalizeSettings(current.value).voice;
-  const selectedVoice = draftVoice ?? voice;
-  const canWriteSettings = localOnly && current.writable;
-  const canWriteCredential = localOnly && credential.writable;
-  const voiceDirty = draftVoice !== undefined && draftVoice !== voice;
-  const keyDirty = draftKey.trim() !== "";
-  const dirty = voiceDirty || keyDirty;
+  const selectedProvider = draftProvider ?? baseline.provider;
+  const selectedField = voiceFieldFor(selectedProvider);
+  const selectedSavedVoice = baseline[selectedField];
+  const selectedDraftVoice = draftVoices[selectedProvider];
+  const selectedVoice = selectedDraftVoice ?? selectedSavedVoice;
+  const selectedKey = draftKeys[selectedProvider] ?? "";
+  const voiceError = validateVoiceDraft(selectedDraftVoice, defaultVoiceFor(selectedProvider));
+
+  const providerDirty = draftProvider !== undefined && draftProvider !== baseline.provider;
+  const voiceDirty = TTS_PROVIDERS.some((provider) => {
+    const draft = draftVoices[provider];
+    return draft !== undefined && normalizeVoiceId(draft, defaultVoiceFor(provider)) !== baseline[voiceFieldFor(provider)];
+  });
+  const keyDirty = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "");
+  const invalidVoice = TTS_PROVIDERS.some((provider) => validateVoiceDraft(draftVoices[provider], defaultVoiceFor(provider)) !== undefined);
+  const dirty = providerDirty || voiceDirty || keyDirty || TTS_PROVIDERS.some((provider) => draftVoices[provider] !== undefined);
+  const canWriteSettings = localOnly && snapshot.mode === "host" && snapshot.writable;
+  const credentialBlocked = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "" && !(localOnly && credentials[provider]?.writable));
+  const canSave = dirty && !saving && canWriteSettings && !credentialBlocked && !invalidVoice;
 
   const text = {
-    title: t?.("title") ?? "Qwen voice",
-    description: t?.("description") ?? "Choose the voice used to prepare tagged assistant passages.",
-    voice: t?.("voice") ?? "Voice",
-    voiceHint: t?.("voiceHint") ?? "New passages use this voice after you save.",
-    apiKey: t?.("apiKey") ?? "DashScope API key",
+    title: t?.("title") ?? "Tagged speech",
+    description: t?.("description") ?? "Choose the provider and voice used for tagged assistant passages.",
+    provider: t?.("provider") ?? "Provider",
+    providerHint: t?.("providerHint") ?? "New passages use this provider after you save.",
+    voice: t?.("voice") ?? "Voice ID",
+    voiceHint: t?.("voiceHint") ?? "Enter a provider-supported Voice ID (up to 128 characters).",
+    apiKey: labels?.apiKey ?? t?.("apiKey") ?? (selectedProvider === "bytedance" ? "Volcengine API key" : "DashScope API key"),
     apiKeyHint: t?.("apiKeyHint") ?? "Enter a new key to replace the configured key. Leave blank to keep it.",
     configured: t?.("configured") ?? "Configured",
     notConfigured: t?.("notConfigured") ?? "Not configured",
@@ -155,49 +225,102 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     discard: t?.("discard") ?? "Discard",
     saveFailed: t?.("saveFailed") ?? "The deployment did not accept these values; they were left for you to correct.",
     readOnly: t?.("readOnly") ?? "This deployment is read-only.",
+    voiceRequired: t?.("voiceRequired") ?? "Voice ID is required.",
+    voiceTooLong: t?.("voiceTooLong") ?? `Voice ID must be ${VOICE_ID_MAX_LENGTH} characters or fewer.`,
     ...labels
   };
 
-  // DSH's PluginCard is absent when its namespace is unavailable.
-  if (current.status !== "ready") return null;
+  // DSH's PluginCard is absent while its namespace is unavailable/loading.
+  if (snapshot.status !== "ready") return null;
+
+  const editProvider = (event: { target: { value: string } }) => {
+    if (!canWriteSettings || saving) return;
+    const next = normalizeProvider(event.target.value);
+    setDraftProvider(next === baseline.provider ? undefined : next);
+    setFailed(false);
+  };
 
   const editVoice = (event: { target: { value: string } }) => {
     if (!canWriteSettings || saving) return;
-    const next = (VOICE_IDS as readonly string[]).includes(event.target.value)
-      ? event.target.value as VoiceId
-      : DEFAULT_VOICE;
-    setDraftVoice(next === voice ? undefined : next);
+    const value = event.target.value;
+    setDraftVoices((current) => ({ ...current, [selectedProvider]: value === selectedSavedVoice ? undefined : value }));
+    setFailed(false);
+  };
+
+  const editKey = (event: { target: { value: string } }) => {
+    if (!(localOnly && credentials[selectedProvider]?.writable) || saving) return;
+    const value = event.target.value;
+    setDraftKeys((current) => ({ ...current, [selectedProvider]: value }));
     setFailed(false);
   };
 
   const discard = () => {
     if (saving) return;
-    setDraftVoice(undefined);
-    setDraftKey("");
+    setDraftProvider(undefined);
+    setDraftVoices({});
+    setDraftKeys({ ...EMPTY_DRAFT_KEYS });
     setFailed(false);
   };
 
   const save = async () => {
-    if (!dirty || saving || !canWriteSettings && voiceDirty || !canWriteCredential && keyDirty) return;
+    if (!canSave) return;
     setSaving(true);
     setFailed(false);
-    let landed = true;
+    const credentialProviders: TtsProvider[] = [];
     try {
-      if (voiceDirty && draftVoice !== undefined) await scope.set("voice", draftVoice);
-      if (keyDirty && canWriteCredential) {
-        await saveCredential(api, draftKey.trim());
-        setCredential(await describeCredential(api));
+      // Credentials must land before a setting can select a profile that needs
+      // one. Keep every draft until the whole ordered transaction succeeds.
+      for (const provider of TTS_PROVIDERS) {
+        const value = (draftKeys[provider] ?? "").trim();
+        if (!value) continue;
+        await saveCredential(api, value, credentialRefFor(provider));
+        credentialProviders.push(provider);
       }
+
+      for (const provider of TTS_PROVIDERS) {
+        const draft = draftVoices[provider];
+        const field = voiceFieldFor(provider);
+        if (draft === undefined) continue;
+        const value = normalizeVoiceId(draft, defaultVoiceFor(provider));
+        if (value === baseline[field]) continue;
+        await scope.set(field, value);
+        if (normalizeSettings(scope.getSnapshot().value)[field] !== value) throw new Error("settings-rejected");
+      }
+
+      if (draftProvider !== undefined && draftProvider !== baseline.provider) {
+        await scope.set("provider", draftProvider);
+        if (normalizeSettings(scope.getSnapshot().value).provider !== draftProvider) throw new Error("settings-rejected");
+      }
+
+      await Promise.all(credentialProviders.map(async (provider) => {
+        const status = await describeCredential(api, credentialRefFor(provider));
+        setCredentials((current) => ({ ...current, [provider]: status }));
+      }));
+      // The scope has settled each accepted write. Reading it here also keeps
+      // clean fields current if another Host refresh arrived while saving.
+      setBaseline(normalizeSettings(scope.getSnapshot().value));
+      setDraftProvider(undefined);
+      setDraftVoices({});
+      setDraftKeys({ ...EMPTY_DRAFT_KEYS });
     } catch {
-      landed = false;
+      // An earlier credential may have succeeded; retaining all drafts makes a
+      // retry safe and gives the user the exact values that still need landing.
+      await Promise.all(credentialProviders.map(async (provider) => {
+        const status = await describeCredential(api, credentialRefFor(provider));
+        setCredentials((current) => ({ ...current, [provider]: status }));
+      }));
+      setFailed(true);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    if (landed) {
-      setDraftVoice(undefined);
-      setDraftKey("");
-    }
-    setFailed(!landed);
   };
+
+  const selectedCredential = credentials[selectedProvider] ?? DEFAULT_STATUS;
+  const voiceErrorText = voiceError === "required"
+    ? text.voiceRequired
+    : voiceError === "too-long"
+      ? text.voiceTooLong
+      : undefined;
 
   return createElement(
     "li",
@@ -234,21 +357,45 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
           createElement(
             "div",
             { className: styles.settingsFieldHead },
-            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-voice` }, text.voice)
+            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-provider` }, text.provider)
           ),
           createElement(
             "select",
             {
-              id: `${cardId}-voice`,
+              id: `${cardId}-provider`,
               className: styles.settingsSelect,
-              value: selectedVoice,
-              onChange: editVoice,
+              value: selectedProvider,
+              onChange: editProvider,
               disabled: saving || !canWriteSettings,
-              "aria-describedby": `${cardId}-voice-hint`
+              "aria-describedby": `${cardId}-provider-hint`,
+              "data-settings-field": "provider"
             },
-            VOICE_IDS.map((id) => createElement("option", { key: id, value: id }, VOICE_LABELS[id]))
+            createElement("option", { value: "alibaba" }, "Alibaba"),
+            createElement("option", { value: "bytedance" }, "ByteDance")
           ),
-          createElement("p", { className: styles.settingsHint, id: `${cardId}-voice-hint` }, text.voiceHint)
+          createElement("p", { className: styles.settingsHint, id: `${cardId}-provider-hint` }, text.providerHint)
+        ),
+        createElement(
+          "div",
+          { className: styles.settingsField },
+          createElement(
+            "div",
+            { className: styles.settingsFieldHead },
+            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-voice` }, text.voice)
+          ),
+          createElement("input", {
+            id: `${cardId}-voice`,
+            className: styles.settingsInput,
+            type: "text",
+            autoComplete: "off",
+            value: selectedVoice,
+            disabled: saving || !canWriteSettings,
+            onChange: editVoice,
+            "aria-invalid": voiceErrorText !== undefined ? true : undefined,
+            "aria-describedby": `${cardId}-voice-hint`,
+            "data-settings-field": `${selectedProvider}-voice`
+          }),
+          createElement("p", { className: styles.settingsHint, id: `${cardId}-voice-hint` }, voiceErrorText ?? text.voiceHint)
         ),
         createElement(
           "div",
@@ -259,22 +406,20 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
             createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-key` }, text.apiKey),
             createElement(
               "span",
-              { className: credential.configured ? styles.settingsBadge : styles.settingsBadgeMuted, "data-configured": credential.configured ? "yes" : "no" },
-              credential.configured ? text.configured : text.notConfigured
+              { className: selectedCredential.configured ? styles.settingsBadge : styles.settingsBadgeMuted, "data-configured": selectedCredential.configured ? "yes" : "no" },
+              selectedCredential.configured ? text.configured : text.notConfigured
             )
           ),
           createElement("input", {
             id: `${cardId}-key`,
             className: styles.settingsInput,
             type: "password",
-            autoComplete: "off",
-            value: draftKey,
-            disabled: saving || !canWriteCredential,
-            onChange: (event: { target: { value: string } }) => {
-              setDraftKey(event.target.value);
-              setFailed(false);
-            },
-            "aria-describedby": `${cardId}-key-hint`
+            autoComplete: "new-password",
+            value: selectedKey,
+            disabled: saving || !(localOnly && selectedCredential.writable),
+            onChange: editKey,
+            "aria-describedby": `${cardId}-key-hint`,
+            "data-settings-field": `${selectedProvider}-credential`
           }),
           createElement("p", { className: styles.settingsHint, id: `${cardId}-key-hint` }, text.apiKeyHint)
         ),
@@ -283,7 +428,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
           { className: styles.settingsFooter },
           failed ? createElement("p", { className: styles.settingsFailed, role: "status" }, text.saveFailed) : null,
           createElement("button", { type: "button", className: styles.settingsDiscard, disabled: !dirty || saving, onClick: discard }, text.discard),
-          createElement("button", { type: "button", className: styles.settingsSave, disabled: !dirty || saving, onClick: () => void save() }, saving ? text.saving : text.save)
+          createElement("button", { type: "button", className: styles.settingsSave, disabled: !canSave, onClick: () => void save() }, saving ? text.saving : text.save)
         )
       )
       : null

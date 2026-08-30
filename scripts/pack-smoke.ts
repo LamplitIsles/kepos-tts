@@ -211,10 +211,18 @@ try {
   const settingsEnvelope = settings.value as {
     type?: string;
     rpcId?: string;
-    result?: { ok?: boolean; value?: { namespaces?: Array<{ ns?: string; value?: { voice?: string } }> } };
+    result?: { ok?: boolean; value?: { namespaces?: Array<{ ns?: string; value?: { provider?: string; alibabaVoice?: string; bytedanceVoice?: string } }> } };
   };
   const namespace = settingsEnvelope.result?.value?.namespaces?.find((candidate) => candidate.ns === "kepos-tts");
-  if (!settings.response.ok || settingsEnvelope.type !== "server-response" || settingsEnvelope.rpcId !== "pack-smoke-settings" || settingsEnvelope.result?.ok !== true || namespace?.value?.voice !== "onoAnna") {
+  if (
+    !settings.response.ok ||
+    settingsEnvelope.type !== "server-response" ||
+    settingsEnvelope.rpcId !== "pack-smoke-settings" ||
+    settingsEnvelope.result?.ok !== true ||
+    namespace?.value?.provider !== "alibaba" ||
+    namespace?.value?.alibabaVoice !== "Maia" ||
+    namespace?.value?.bytedanceVoice !== "zh_female_sajiaoxuemei_uranus_bigtts"
+  ) {
     throw new Error(`installed Settings registration did not activate: ${JSON.stringify(settings.value)}`);
   }
 

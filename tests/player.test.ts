@@ -17,7 +17,7 @@ describe("tagged TTS player", () => {
       root = create(createElement(TtsAudioPlayer, {
         text: "你好",
         transcript: "你好",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));
@@ -46,15 +46,15 @@ describe("tagged TTS player", () => {
     clearTtsPreparationCache(client);
     const one = new TtsPlayer(client);
     const two = new TtsPlayer(client);
-    const first = one.prepare("  你好\n", "onoAnna", "session-a");
-    const second = two.prepare("你好", "onoAnna", "session-a");
+    const first = one.prepare("  你好\n", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
+    const second = two.prepare("你好", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     await Promise.resolve();
     await Promise.resolve();
     expect(calls).toBe(1);
     release();
     await Promise.all([first, second]);
-    expect(one.preparedUrl("你好", "onoAnna", "session-a")).toBe(payload.url);
-    expect(two.preparedUrl("你好", "onoAnna", "session-a")).toBe(payload.url);
+    expect(one.preparedUrl("你好", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a")).toBe(payload.url);
+    expect(two.preparedUrl("你好", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a")).toBe(payload.url);
     one.dispose();
     two.dispose();
   });
@@ -65,15 +65,15 @@ describe("tagged TTS player", () => {
     const client = { synthesize: async () => { calls += 1; return new Promise<BrowserAudioPayload>((resolve) => { settle = resolve; }); } };
     clearTtsPreparationCache(client);
     const first = new TtsPlayer(client);
-    const pending = first.prepare("稍等", "onoAnna", "session-a");
+    const pending = first.prepare("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     await new Promise((resolve) => setTimeout(resolve, 0));
     first.dispose();
     settle(payload);
     await pending;
     const second = new TtsPlayer(client);
-    await second.prepare("稍等", "onoAnna", "session-a");
+    await second.prepare("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(calls).toBe(1);
-    expect(second.preparedUrl("稍等", "onoAnna", "session-a")).toBe(payload.url);
+    expect(second.preparedUrl("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a")).toBe(payload.url);
     second.dispose();
   });
 
@@ -85,7 +85,7 @@ describe("tagged TTS player", () => {
     await act(async () => {
       first = create(createElement(TtsAudioPlayer, {
         text: "已经准备",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));
@@ -98,7 +98,7 @@ describe("tagged TTS player", () => {
     act(() => {
       remounted = create(createElement(TtsAudioPlayer, {
         text: "已经准备",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));
@@ -120,10 +120,10 @@ describe("tagged TTS player", () => {
     };
     clearTtsPreparationCache(client);
     const first = new TtsPlayer(client);
-    await first.prepare("重试", "onoAnna", "session-a");
+    await first.prepare("重试", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(first.getSnapshot().status).toBe("error");
     const second = new TtsPlayer(client);
-    await second.prepare("重试", "onoAnna", "session-a");
+    await second.prepare("重试", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(calls).toBe(2);
     expect(second.getSnapshot().status).toBe("ready");
     first.dispose();
@@ -136,13 +136,13 @@ describe("tagged TTS player", () => {
     const client = { synthesize: async () => { calls += 1; return payload; } };
     clearTtsPreparationCache(client);
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "onoAnna", sessionId: "session-a", client }));
+      root = create(createElement(TtsAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a", client }));
       await Promise.resolve();
       await Promise.resolve();
     });
     const originalSrc = root!.root.findByType("audio").props.src;
     await act(async () => {
-      root!.update(createElement(TtsAudioPlayer, { text: "同一句", voiceKey: "maia", sessionId: "session-a", client }));
+      root!.update(createElement(TtsAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Other\"]", sessionId: "session-a", client }));
       await Promise.resolve();
     });
     expect(calls).toBe(1);
@@ -158,7 +158,7 @@ describe("tagged TTS player", () => {
       root = create(createElement(TtsAudioPlayer, {
         text: "你好",
         transcript: "你好（旁白）",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));
@@ -180,7 +180,7 @@ describe("tagged TTS player", () => {
       root = create(createElement(TtsAudioPlayer, {
         text: "缓存已丢失",
         transcript: "缓存已丢失（旁白）",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));
@@ -197,7 +197,7 @@ describe("tagged TTS player", () => {
     await act(async () => {
       remounted = create(createElement(TtsAudioPlayer, {
         text: "缓存已丢失",
-        voiceKey: "onoAnna",
+        profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
         client
       }));

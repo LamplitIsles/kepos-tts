@@ -3,14 +3,16 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { QWEN_MODEL } from "./constants.js";
+import {
+  normalizeProfile
+} from "./constants.js";
 import { normalizeTtsText } from "./parser.js";
 
 /** Maximum provider payload accepted and maximum cached artifact served. */
 export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 /** Bump when the on-disk key or artifact contract changes. */
-export const CACHE_FORMAT_VERSION = 1;
+export const CACHE_FORMAT_VERSION = 2;
 export const TTS_CACHE_DIRECTORY = ".dsh/kepos-tts/audio";
 export const AUDIO_ROUTE_PATH = "/kepos-tts/audio";
 
@@ -47,13 +49,25 @@ export function audioArtifactPath(workspaceCwd: string, digest: string): string 
 }
 
 /**
- * Build the deterministic cache digest from the format, model, voice, and
- * normalized passage. JSON gives each field an unambiguous boundary.
+ * Build the deterministic cache digest from the format, provider, provider
+ * model/resource, voice, and normalized passage. JSON gives each field an
+ * unambiguous boundary.
  */
-export function cacheDigest(text: string, voice: string, formatVersion = CACHE_FORMAT_VERSION): string {
+export function cacheDigest(
+  text: string,
+  profile: unknown,
+  formatVersion = CACHE_FORMAT_VERSION
+): string {
+  const normalizedProfile = normalizeProfile(profile);
   const normalized = normalizeTtsText(text);
   return createHash("sha256")
-    .update(JSON.stringify([formatVersion, QWEN_MODEL, voice, normalized]), "utf8")
+    .update(JSON.stringify([
+      formatVersion,
+      normalizedProfile.provider,
+      normalizedProfile.model,
+      normalizedProfile.voice,
+      normalized
+    ]), "utf8")
     .digest("hex");
 }
 

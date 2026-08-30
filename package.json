@@ -1,7 +1,7 @@
 {
   "name": "@lamplitisles/kepos-tts",
   "version": "0.1.0",
-  "description": "Qwen Chinese tagged text-to-speech for DeepSeek Harness Web",
+  "description": "Alibaba and ByteDance Chinese tagged text-to-speech for DeepSeek Harness Web",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

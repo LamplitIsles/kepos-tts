@@ -11,19 +11,19 @@ import type {} from "@deepseek-ai/dsh-client-ui-slots";
 import { RPC_CHANNEL, RPC_ENDPOINT, type BrowserAudioPayload } from "./rpc.js";
 import {
   SETTINGS_NAMESPACE,
-  normalizeSettings,
-  type QwenTtsSettings
+  providerProfileKey,
+  type TtsSettings
 } from "./constants.js";
-import { TtsAssistantNodeView, type VoiceSource } from "./client/assistant-node.js";
+import { TtsAssistantNodeView, type ProfileSource } from "./client/assistant-node.js";
 import { TtsSettingsCard, decodeSettings, type ClientSettingsScope, type CredentialApi } from "./client/settings-card.js";
 import type { TtsRpcClient } from "./player.js";
 
 export const inject = ["connection", "locale", "settingsScope", "slots"] as const;
 
 export type TtsLocaleKey =
-  | "title" | "description" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
+  | "title" | "description" | "provider" | "providerHint" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
   | "configured" | "notConfigured" | "expand" | "collapse" | "unsaved" | "save"
-  | "saving" | "discard" | "saveFailed" | "readOnly" | "message.reasoning"
+  | "saving" | "discard" | "saveFailed" | "readOnly" | "voiceRequired" | "voiceTooLong" | "message.reasoning"
   | "message.unknownBlock" | "message.stopped" | "message.preparingAudio" | "message.audio"
   | "message.audioUnavailable" | "json.truncated" | "row.running";
 
@@ -34,11 +34,13 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 }
 
 const en: Record<TtsLocaleKey, string> = {
-  title: "Qwen voice",
-  description: "Choose the voice used to prepare tagged assistant passages.",
-  voice: "Voice",
-  voiceHint: "New passages use this voice after you save.",
-  apiKey: "DashScope API key",
+  title: "Tagged speech",
+  description: "Choose the provider and voice used to prepare tagged assistant passages.",
+  provider: "Provider",
+  providerHint: "New passages use this provider after you save.",
+  voice: "Voice ID",
+  voiceHint: "Enter a provider-supported Voice ID (up to 128 characters).",
+  apiKey: "API key",
   apiKeyHint: "Enter a new key to replace the configured key. Leave blank to keep it.",
   configured: "Configured",
   notConfigured: "Not configured",
@@ -50,6 +52,8 @@ const en: Record<TtsLocaleKey, string> = {
   discard: "Discard",
   saveFailed: "The deployment did not accept these values; they were left for you to correct.",
   readOnly: "This deployment is read-only.",
+  voiceRequired: "Voice ID is required.",
+  voiceTooLong: "Voice ID must be 128 characters or fewer.",
   "message.reasoning": "Reasoning",
   "message.unknownBlock": "Unknown message block",
   "message.stopped": "Stopped",
@@ -61,11 +65,13 @@ const en: Record<TtsLocaleKey, string> = {
 };
 
 const zh: Record<TtsLocaleKey, string> = {
-  title: "Qwen 语音",
-  description: "选择用于预取助手标记片段的声音。",
-  voice: "声音",
-  voiceHint: "保存后，新片段将使用此声音。",
-  apiKey: "DashScope API 密钥",
+  title: "标记语音",
+  description: "选择用于预取助手标记片段的服务商和声音。",
+  provider: "服务商",
+  providerHint: "保存后，新片段将使用此服务商。",
+  voice: "声音 ID",
+  voiceHint: "输入服务商支持的声音 ID（最多 128 个字符）。",
+  apiKey: "API 密钥",
   apiKeyHint: "输入新密钥以替换现有密钥。留空则保留现有密钥。",
   configured: "已配置",
   notConfigured: "未配置",
@@ -77,6 +83,8 @@ const zh: Record<TtsLocaleKey, string> = {
   discard: "放弃",
   saveFailed: "本部署未接受这些值；已保留供你修改。",
   readOnly: "此部署为只读。",
+  voiceRequired: "声音 ID 不能为空。",
+  voiceTooLong: "声音 ID 不能超过 128 个字符。",
   "message.reasoning": "推理",
   "message.unknownBlock": "未知消息块",
   "message.stopped": "已停止",
@@ -97,11 +105,11 @@ export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): T
   };
 }
 
-export function createVoiceSource(scope: Pick<SettingsScope<Partial<QwenTtsSettings>>, "getSnapshot" | "subscribe">): VoiceSource & { dispose(): void } {
-  let current = normalizeSettings(scope.getSnapshot().value).voice;
+export function createProfileSource(scope: Pick<SettingsScope<Partial<TtsSettings>>, "getSnapshot" | "subscribe">): ProfileSource & { dispose(): void } {
+  let current = providerProfileKey(scope.getSnapshot().value);
   const listeners = new Set<() => void>();
   const unsubscribe = scope.subscribe(() => {
-    const next = normalizeSettings(scope.getSnapshot().value).voice;
+    const next = providerProfileKey(scope.getSnapshot().value);
     if (next === current) return;
     current = next;
     for (const listener of listeners) listener();
@@ -122,14 +130,14 @@ export function createVoiceSource(scope: Pick<SettingsScope<Partial<QwenTtsSetti
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(SETTINGS_NAMESPACE, { en, zh }), "kepos-tts: dictionaries");
 
-  const scope = ctx.settingsScope.bind<Partial<QwenTtsSettings>>({
+  const scope = ctx.settingsScope.bind<Partial<TtsSettings>>({
     namespace: SETTINGS_NAMESPACE,
     decode: decodeSettings
   }) as ClientSettingsScope;
   const clientContext = ctx as unknown as ClientContext & { connection: ConnectionHandle & { api: CredentialApi } };
   const connection = clientContext.connection;
-  const voiceSource = createVoiceSource(scope);
-  ctx.effect(() => () => voiceSource.dispose(), "kepos-tts: voice settings observer");
+  const profileSource = createProfileSource(scope);
+  ctx.effect(() => () => profileSource.dispose(), "kepos-tts: profile settings observer");
   const client = createTtsRpcClient(connection);
 
   ctx.slots.inject("settings.plugin.item", () => ctx.slots.register(
@@ -158,13 +166,13 @@ export function apply(ctx: ClientContext): void {
     ((props: Record<string, unknown>) => createElement(TtsAssistantNodeView, {
       ...props,
       client,
-      voiceSource
+      profileSource
     } as never)) as never
   ));
 }
 
 export { TtsAudioPlayer, TtsPlayer } from "./player.js";
 export { TtsSettingsCard, decodeSettings, describeCredential, saveCredential } from "./client/settings-card.js";
-export { TtsAssistantNodeView, renderAssistantBlocks } from "./client/assistant-node.js";
+export { TtsAssistantNodeView, renderAssistantBlocks, type ProfileSource } from "./client/assistant-node.js";
 
 export default { inject, apply };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTtsRpcClient } from "../src/client.js";
+import { createProfileSource, createTtsRpcClient } from "../src/client.js";
 import { RPC_CHANNEL, RPC_ENDPOINT } from "../src/rpc.js";
 
 describe("createTtsRpcClient", () => {
@@ -30,5 +30,29 @@ describe("createTtsRpcClient", () => {
       RPC_ENDPOINT,
       { text: "你好", sessionId: "session-a" }
     ]);
+  });
+});
+
+describe("createProfileSource", () => {
+  it("publishes only selected provider-profile changes", () => {
+    let value: any = { provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: "byte" };
+    const listeners = new Set<() => void>();
+    const source = createProfileSource({
+      getSnapshot: () => ({ value } as any),
+      subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }
+    });
+    const initial = source.getSnapshot();
+    let updates = 0;
+    const unsubscribe = source.subscribe(() => { updates += 1; });
+    value = { ...value, bytedanceVoice: "other" };
+    listeners.forEach((listener) => listener());
+    expect(source.getSnapshot()).toBe(initial);
+    expect(updates).toBe(0);
+    value = { ...value, provider: "bytedance" };
+    listeners.forEach((listener) => listener());
+    expect(source.getSnapshot()).not.toBe(initial);
+    expect(updates).toBe(1);
+    unsubscribe();
+    source.dispose();
   });
 });
