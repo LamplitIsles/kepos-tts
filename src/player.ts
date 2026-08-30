@@ -95,6 +95,14 @@ export class TtsPlayer {
     return this.hasCached(text, voiceKey, sessionId) ? this.cached?.url : undefined;
   }
 
+  /** Forget a stale workspace URL when the browser cannot load its media. */
+  failAudioLoad(): void {
+    if (this.disposed || !this.currentKey) return;
+    cacheFor(this.client).delete(this.currentKey);
+    this.cached = undefined;
+    this.publish({ status: "error", error: "audio-load-failed" });
+  }
+
   /** Seed a remounted player from resolved page memory without publishing a new state cycle. */
   hydrate(text: string, voiceKey: string, sessionId: string): boolean {
     if (this.disposed) return false;
@@ -197,6 +205,7 @@ export function TtsAudioPlayer({
         controls: true,
         preload: "metadata",
         src,
+        onError: () => player.failAudioLoad(),
         "aria-label": `${labels?.audio ?? "Audio message"}: ${transcript}`
       })
     );

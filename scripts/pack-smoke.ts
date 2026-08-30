@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
@@ -27,9 +27,9 @@ function dshEntry(): string {
   return entry;
 }
 
-function startRuntime(entry: string, env: NodeJS.ProcessEnv): Promise<{ child: ChildProcess; baseUrl: string }> {
+function startRuntime(entry: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ child: ChildProcess; baseUrl: string }> {
   const child = spawn(process.execPath, ["--expose-internals", entry, "--profile", "web", "--host", "127.0.0.1", "--port", "0", "--no-open"], {
-    cwd: root,
+    cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -61,6 +61,27 @@ function startRuntime(entry: string, env: NodeJS.ProcessEnv): Promise<{ child: C
       finish(new Error(`timed out waiting for DSH Web runtime: ${output}`));
     }, 30_000);
   });
+}
+
+function isolatedEnvironment(temp: string, dshHome: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of ["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL"]) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
+  const testHome = join(temp, "home");
+  return {
+    ...env,
+    HOME: testHome,
+    USERPROFILE: testHome,
+    DSH_HOME: dshHome,
+    DSH_TELEMETRY_DISABLED: "1",
+    npm_config_store_dir: join(temp, "pnpm-store"),
+    npm_config_cache: join(temp, "npm-cache"),
+    XDG_CACHE_HOME: join(temp, "cache"),
+    XDG_CONFIG_HOME: join(temp, "config"),
+    XDG_DATA_HOME: join(temp, "data"),
+    XDG_STATE_HOME: join(temp, "state")
+  };
 }
 
 async function stopRuntime(child: ChildProcess): Promise<void> {
@@ -104,18 +125,13 @@ try {
   const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temp], { cwd: root, encoding: "utf8" })) as Array<{ filename: string }>;
   const tarball = join(temp, packed[0]!.filename);
   const home = join(temp, "dsh-home");
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    DSH_HOME: home,
-    DSH_TELEMETRY_DISABLED: "1",
-    npm_config_store_dir: join(temp, "pnpm-store"),
-    npm_config_cache: join(temp, "npm-cache"),
-    XDG_CACHE_HOME: join(temp, "cache")
-  };
+  const runtimeCwd = join(temp, "runtime-cwd");
+  mkdirSync(runtimeCwd, { recursive: true });
+  const env = isolatedEnvironment(temp, home);
   const entry = dshEntry();
   try {
     execFileSync(process.execPath, ["--expose-internals", entry, "plugin", "--profile", "web", "add", tarball, "--ignore-scripts"], {
-      cwd: root,
+      cwd: runtimeCwd,
       stdio: "pipe",
       env
     });
@@ -139,7 +155,7 @@ try {
     if (!patch.includes(required)) throw new Error(`Cordis patch is missing ${required}`);
   }
 
-  runtime = await startRuntime(entry, env);
+  runtime = await startRuntime(entry, env, runtimeCwd);
   const homePage = await fetch(runtime.baseUrl);
   if (!homePage.ok) throw new Error(`installed DSH Web runtime returned ${homePage.status} for /`);
   const html = await homePage.text();

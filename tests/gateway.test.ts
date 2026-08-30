@@ -12,6 +12,7 @@ import {
 } from "../src/settings.js";
 import {
   AUDIO_ROUTE_PATH,
+  MAX_AUDIO_BYTES,
   QwenTtsGateway,
   RPC_ENDPOINT,
   TtsGatewayError,
@@ -144,6 +145,22 @@ describe("Qwen gateway", () => {
     await expect(gateway.synthesize({ sessionId: "session-a", text: "你".repeat(241) })).rejects.toMatchObject({ category: "invalid-input" });
   });
 
+  it("stops before provider I/O when the named credential is absent", async () => {
+    const cwd = await workspace();
+    let fetchCalls = 0;
+    const gateway = new QwenTtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => undefined },
+      getVoice: () => "onoAnna",
+      fetch: async () => {
+        fetchCalls += 1;
+        throw new Error("provider must not be contacted without a credential");
+      }
+    });
+    await expect(gateway.synthesize({ sessionId: "session-a", text: "没有密钥" })).rejects.toMatchObject({ category: "unavailable" });
+    expect(fetchCalls).toBe(0);
+  });
+
   it("returns non-sensitive provider and malformed-audio failures", async () => {
     const cwd = await workspace();
     const base = { sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getVoice: () => "onoAnna" };
@@ -169,6 +186,29 @@ describe("Qwen gateway", () => {
     const result: BrowserAudioPayload = await gateway.synthesize({ sessionId: "session-a", text: "播放" });
     expect(result).toMatchObject({ mediaType: "audio/mpeg", bytes: 3 });
     expect(result.url).toMatch(/\/kepos-tts\/audio\/[a-f0-9]{64}\.mp3\?sessionId=session-a/);
+    expect(calls).toBe(2);
+  });
+
+  it("rejects oversized URL audio before buffering its body", async () => {
+    const cwd = await workspace();
+    let calls = 0;
+    const gateway = new QwenTtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getVoice: () => "onoAnna",
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) return response({ output: { audio: { url: "https://audio.example/oversized.mp3" } } });
+        return new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: {
+            "content-type": "audio/mpeg",
+            "content-length": String(MAX_AUDIO_BYTES + 1)
+          }
+        });
+      }
+    });
+    await expect(gateway.synthesize({ sessionId: "session-a", text: "太大" })).rejects.toMatchObject({ category: "provider-invalid-audio" });
     expect(calls).toBe(2);
   });
 

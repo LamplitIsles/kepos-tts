@@ -95,8 +95,43 @@ function failure<T>(category: TtsFailureCategory): RpcResult<T> {
   return { ok: false, error: { code: "internal", message: category, details: {} } } as RpcResult<T>;
 }
 
-function asBytes(value: ArrayBuffer): Uint8Array {
-  return new Uint8Array(value);
+const MAX_PROVIDER_JSON_BYTES = Math.ceil(MAX_AUDIO_BYTES / 3) * 4 + 64 * 1024;
+
+async function readBoundedResponse(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null) {
+    const declared = Number(contentLength);
+    if (!Number.isSafeInteger(declared) || declared < 0 || declared > maxBytes) {
+      throw new Error("response-too-large");
+    }
+  }
+  if (!response.body) throw new Error("empty-response");
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("response-too-large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 function base64ToBytes(value: string): Uint8Array | undefined {
@@ -179,7 +214,8 @@ async function providerBytes(
 
   let body: unknown;
   try {
-    body = await response.json();
+    const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
+    body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
     throw new TtsGatewayError("provider-invalid-audio");
   }
@@ -195,7 +231,7 @@ async function providerBytes(
       if (!audioResponse.ok) throw new Error("status");
       const contentType = typeof audioResponse.headers?.get === "function" ? audioResponse.headers.get("content-type") : "";
       if (contentType && !contentType.startsWith("audio/") && contentType !== "application/octet-stream") throw new Error("content-type");
-      bytes = asBytes(await audioResponse.arrayBuffer());
+      bytes = await readBoundedResponse(audioResponse, MAX_AUDIO_BYTES);
     } catch {
       throw new TtsGatewayError("provider-invalid-audio");
     }

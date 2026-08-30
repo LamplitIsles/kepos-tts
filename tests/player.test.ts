@@ -170,4 +170,41 @@ describe("tagged TTS player", () => {
     expect(player.findByProps({ role: "status" }).children.join("")).toContain("Audio unavailable");
     root!.unmount();
   });
+
+  it("shows the transcript and forgets a stale cache URL when audio loading fails", async () => {
+    let calls = 0;
+    const client = { synthesize: async () => { calls += 1; return payload; } };
+    clearTtsPreparationCache(client);
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      root = create(createElement(TtsAudioPlayer, {
+        text: "缓存已丢失",
+        transcript: "缓存已丢失（旁白）",
+        voiceKey: "onoAnna",
+        sessionId: "session-a",
+        client
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => root!.root.findByType("audio").props.onError());
+    const failed = root!.root.findByProps({ "data-tts-state": "error" });
+    expect(failed.findByProps({ "data-tts-transcript": true }).children.join("")).toContain("缓存已丢失（旁白）");
+    root!.unmount();
+
+    let remounted: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      remounted = create(createElement(TtsAudioPlayer, {
+        text: "缓存已丢失",
+        voiceKey: "onoAnna",
+        sessionId: "session-a",
+        client
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(calls).toBe(2);
+    remounted!.unmount();
+  });
 });
