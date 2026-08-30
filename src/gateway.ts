@@ -52,6 +52,7 @@ export interface TtsFailureDiagnostic {
   responseContentType?: string;
   responseBytes?: number;
   requestId?: string;
+  responsePrefixHex?: string;
 }
 
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
@@ -111,7 +112,7 @@ function safeUpstreamMessage(message: string | undefined, sensitive: readonly st
 function providerDiagnostic(
   profile: Pick<TtsProfile, "provider" | "voice">,
   stage: NonNullable<TtsFailureDiagnostic["stage"]>,
-  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId"> = {}
+  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "upstreamCode" | "upstreamMessage" | "responseContentType" | "responseBytes" | "requestId" | "responsePrefixHex"> = {}
 ): Omit<TtsFailureDiagnostic, "category"> {
   return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
@@ -205,6 +206,10 @@ function responseDiagnostic(response: Response, responseBytes?: number): Pick<Tt
     ...(responseBytes === undefined ? {} : { responseBytes }),
     ...(requestId ? { requestId } : {})
   };
+}
+
+function bytePrefixHex(bytes: Uint8Array, maxBytes = 24): string {
+  return Array.from(bytes.subarray(0, maxBytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function httpProviderRejection(
@@ -467,14 +472,20 @@ async function bytedanceBytes(
 
   let frames: ByteDanceFrame[] | undefined;
   let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
+  let responsePrefixHex: string | undefined;
   try {
     const encoded = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
     responseMeta = responseDiagnostic(response, encoded.byteLength);
+    responsePrefixHex = bytePrefixHex(encoded);
     frames = parseByteDanceFrames(new TextDecoder().decode(encoded));
   } catch {
     frames = undefined;
   }
-  if (!frames) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
+  if (!frames) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic(
+    { provider: "bytedance", voice },
+    "provider-response",
+    { ...responseMeta, ...(responsePrefixHex === undefined ? {} : { responsePrefixHex }) }
+  ));
 
   const chunks: Uint8Array[] = [];
   let total = 0;

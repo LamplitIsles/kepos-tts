@@ -197,6 +197,29 @@ describe("provider-neutral TTS gateway", () => {
     expect(JSON.stringify(failures)).not.toContain("私密正文");
   });
 
+  it("reports a bounded hex signature when a ByteDance body cannot be framed", async () => {
+    const cwd = await workspace();
+    const failures: unknown[] = [];
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
+      getSettings: () => ({ provider: "bytedance" }),
+      fetch: async () => new Response(new Uint8Array([0x1e, 0x7b, 0x22, 0x63, 0x6f, 0x64, 0x65, 0x22, 0x3a, 0x30, 0x7d]), {
+        headers: { "content-type": "text/plain" }
+      }),
+      onFailure: (failure) => failures.push(failure)
+    });
+
+    await gateway.handle(RPC_ENDPOINT, { sessionId: "session-a", text: "私密正文" }, new AbortController().signal);
+
+    expect(failures).toEqual([expect.objectContaining({
+      category: "provider-invalid-audio",
+      responsePrefixHex: "1e7b22636f6465223a307d"
+    })]);
+    expect(JSON.stringify(failures)).not.toContain("私密正文");
+    expect(JSON.stringify(failures)).not.toContain("provider-secret");
+  });
+
   it("resolves only the selected credential and does not perform network I/O when it is absent", async () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
