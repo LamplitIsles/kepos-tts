@@ -4,16 +4,15 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { QWEN_MODEL } from "./constants.js";
+import { normalizeTtsText } from "./parser.js";
 
 /** Maximum provider payload accepted and maximum cached artifact served. */
 export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 /** Bump when the on-disk key or artifact contract changes. */
 export const CACHE_FORMAT_VERSION = 1;
-export const TTS_CACHE_FORMAT_VERSION = CACHE_FORMAT_VERSION;
 export const TTS_CACHE_DIRECTORY = ".dsh/kepos-tts/audio";
 export const AUDIO_ROUTE_PATH = "/kepos-tts/audio";
-export const TTS_AUDIO_ROUTE = AUDIO_ROUTE_PATH;
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -52,13 +51,11 @@ export function audioArtifactPath(workspaceCwd: string, digest: string): string 
  * normalized passage. JSON gives each field an unambiguous boundary.
  */
 export function cacheDigest(text: string, voice: string, formatVersion = CACHE_FORMAT_VERSION): string {
-  const normalized = text.replace(/[\s\u00a0]+/gu, " ").trim();
+  const normalized = normalizeTtsText(text);
   return createHash("sha256")
     .update(JSON.stringify([formatVersion, QWEN_MODEL, voice, normalized]), "utf8")
     .digest("hex");
 }
-
-export const createCacheKey = cacheDigest;
 
 /** Build the same-origin URL a browser audio element can load. */
 export function audioUrl(sessionId: string, digest: string): string {
@@ -79,6 +76,19 @@ export async function readAudioArtifact(path: string, maxBytes = MAX_AUDIO_BYTES
   const bytes = new Uint8Array(await readFile(path));
   if (bytes.byteLength === 0 || bytes.byteLength > maxBytes) return undefined;
   return bytes;
+}
+
+/** Return bounded metadata for a regular cached artifact without reading its contents. */
+export async function readAudioArtifactMetadata(path: string, maxBytes = MAX_AUDIO_BYTES): Promise<{ size: number } | undefined> {
+  let info;
+  try {
+    info = await lstat(path);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+  if (!info.isFile() || info.size <= 0 || info.size > maxBytes) return undefined;
+  return { size: info.size };
 }
 
 /** Publish bytes without ever exposing a partially written destination. */
@@ -162,8 +172,7 @@ export async function serveTtsAudio(
   res.writeHead(200, {
     "content-type": "audio/mpeg",
     "content-length": String(bytes.byteLength),
-    "cache-control": "public, max-age=31536000, immutable",
-    "accept-ranges": "bytes"
+    "cache-control": "public, max-age=31536000, immutable"
   });
   if (method === "HEAD") {
     res.end();

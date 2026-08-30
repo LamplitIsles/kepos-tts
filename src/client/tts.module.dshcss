@@ -220,5 +220,7 @@
 .error { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 
 @media (prefers-reduced-motion: reduce) {
+  .settingsCard,
+  .settingsChevron { transition: none; }
   .reasoningRoot[data-state="running"] .reasoningRow::after { animation: none; }
 }

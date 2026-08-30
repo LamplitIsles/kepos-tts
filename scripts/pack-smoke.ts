@@ -179,7 +179,7 @@ try {
     type: "client-request",
     rpcId: "pack-smoke-rpc",
     method: "synthesize",
-    payload: { text: "" }
+    payload: { text: "", sessionId: "session-smoke" }
   });
   const rpcEnvelope = rpc.value as { type?: string; rpcId?: string; result?: { ok?: boolean; error?: { message?: string } } };
   if (!rpc.response.ok || rpcEnvelope.type !== "server-response" || rpcEnvelope.rpcId !== "pack-smoke-rpc" || rpcEnvelope.result?.error?.message !== "invalid-input") {

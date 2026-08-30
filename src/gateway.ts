@@ -15,15 +15,13 @@ import {
   AUDIO_ROUTE_PATH,
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
-  TTS_AUDIO_ROUTE,
   TTS_CACHE_DIRECTORY,
-  TTS_CACHE_FORMAT_VERSION,
   audioArtifactPath,
   audioCacheDirectory,
   audioUrl,
   cacheDigest,
-  createCacheKey,
   readAudioArtifact,
+  readAudioArtifactMetadata,
   registerTtsAudioRoute,
   resolveSessionWorkspace,
   serveTtsAudio,
@@ -48,15 +46,13 @@ export {
   AUDIO_ROUTE_PATH,
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
-  TTS_AUDIO_ROUTE,
   TTS_CACHE_DIRECTORY,
-  TTS_CACHE_FORMAT_VERSION,
   audioArtifactPath,
   audioCacheDirectory,
   audioUrl,
   cacheDigest,
-  createCacheKey,
   readAudioArtifact,
+  readAudioArtifactMetadata,
   registerTtsAudioRoute,
   resolveSessionWorkspace,
   serveTtsAudio,
@@ -211,7 +207,7 @@ async function providerBytes(
 }
 
 /** Shared in-flight work survives individual gateway instances and renderer disposal. */
-const inFlight = new Map<string, Promise<Uint8Array>>();
+const inFlight = new Map<string, Promise<number>>();
 
 export class QwenTtsGateway {
   private readonly fetchImpl: typeof fetch;
@@ -220,19 +216,19 @@ export class QwenTtsGateway {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private async generateAndCache(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<Uint8Array> {
+  private async generateAndCache(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<number> {
     // This disk check wins a race with another process that published the same
     // deterministic artifact while this request was being scheduled.
-    const existing = await readAudioArtifact(path, MAX_AUDIO_BYTES);
-    if (existing) return existing;
+    const existing = await readAudioArtifactMetadata(path, MAX_AUDIO_BYTES);
+    if (existing) return existing.size;
     const credential = await this.options.credentials.resolve(credentialRef(CREDENTIAL_REF));
     if (!credential?.value) throw new TtsGatewayError("unavailable");
     const bytes = await providerBytes(this.fetchImpl, credential, text, voice);
     await writeAudioArtifactAtomic(path, bytes, MAX_AUDIO_BYTES);
-    return bytes;
+    return bytes.byteLength;
   }
 
-  private async artifact(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<Uint8Array> {
+  private async artifact(path: string, text: string, voice: keyof typeof VOICE_LABELS): Promise<number> {
     const pending = inFlight.get(path);
     if (pending) return pending;
     // Keep the in-flight entry from the initial disk lookup onward. This
@@ -261,13 +257,11 @@ export class QwenTtsGateway {
     const path = audioArtifactPath(workspace, digest);
     // The provider request intentionally does not receive the browser signal:
     // once admitted, generation must finish so another occurrence can reuse it.
-    await this.artifact(path, request.text, voice);
-    const cached = await readAudioArtifact(path, MAX_AUDIO_BYTES);
-    if (!cached) throw new TtsGatewayError("internal");
+    const bytes = await this.artifact(path, request.text, voice);
     return {
       mediaType: "audio/mpeg",
       url: audioUrl(request.sessionId, digest),
-      bytes: cached.byteLength
+      bytes
     };
   }
 

@@ -189,6 +189,7 @@ describe("Qwen gateway", () => {
     await serveTtsAudio({ method: "GET", url: payload.url }, res, sessionStore(cwd));
     expect(captured.status).toBe(200);
     expect(captured.headers).toMatchObject({ "content-type": "audio/mpeg", "content-length": "3" });
+    expect(captured.headers).not.toHaveProperty("accept-ranges");
     expect(captured.body).toEqual(new Uint8Array([0x49, 0x44, 0x33]));
 
     for (const url of [

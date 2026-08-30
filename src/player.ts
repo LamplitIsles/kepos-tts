@@ -13,7 +13,7 @@ export interface TtsPlayerSnapshot {
 
 export interface TtsRpcClient {
   /** Session identity is sent with the finalized passage, never a cache path. */
-  synthesize(text: string, sessionId?: string, signal?: AbortSignal): Promise<BrowserAudioPayload>;
+  synthesize(text: string, sessionId: string, signal?: AbortSignal): Promise<BrowserAudioPayload>;
 }
 
 export interface TtsAudioPlayerProps {
@@ -21,7 +21,7 @@ export interface TtsAudioPlayerProps {
   transcript?: string;
   voiceKey: string;
   /** Framework-provided session identity used by the Host to resolve cwd. */
-  sessionId?: string | undefined;
+  sessionId: string;
   client: TtsRpcClient;
   labels?: Partial<{ preparing: string; audio: string; failed: string }>;
   className?: string;
@@ -86,15 +86,15 @@ export class TtsPlayer {
     for (const listener of this.listeners) listener();
   }
 
-  hasCached(text: string, voiceKey: string, sessionId = ""): boolean {
+  hasCached(text: string, voiceKey: string, sessionId: string): boolean {
     return this.cached?.key === preparationKey(text, voiceKey, sessionId);
   }
 
-  preparedUrl(text: string, voiceKey: string, sessionId = ""): string | undefined {
+  preparedUrl(text: string, voiceKey: string, sessionId: string): string | undefined {
     return this.hasCached(text, voiceKey, sessionId) ? this.cached?.url : undefined;
   }
 
-  async prepare(text: string, voiceKey: string, sessionId = ""): Promise<void> {
+  async prepare(text: string, voiceKey: string, sessionId: string): Promise<void> {
     if (this.disposed) return;
     const normalized = normalizeTtsText(text);
     const key = preparationKey(normalized, voiceKey, sessionId);
@@ -151,7 +151,7 @@ export function TtsAudioPlayer({
   text,
   transcript = text,
   voiceKey,
-  sessionId = "",
+  sessionId,
   client,
   labels,
   className

@@ -89,7 +89,7 @@ const zh: Record<TtsLocaleKey, string> = {
 
 export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): TtsRpcClient {
   return {
-    async synthesize(text: string, sessionId = "", signal?: AbortSignal): Promise<BrowserAudioPayload> {
+    async synthesize(text: string, sessionId: string, signal?: AbortSignal): Promise<BrowserAudioPayload> {
       const result = await connection.rpc.call(RPC_CHANNEL, RPC_ENDPOINT, { text, sessionId }, signal);
       if (!result.ok) throw new Error(result.error.message);
       return result.value as BrowserAudioPayload;

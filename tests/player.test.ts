@@ -11,7 +11,7 @@ describe("tagged TTS player", () => {
   it("prefetches audio when the finalized message mounts and renders a native player", async () => {
     let calls = 0;
     let root: ReturnType<typeof create> | undefined;
-    const client = { synthesize: async (_text: string, sessionId?: string) => { calls += 1; expect(sessionId).toBe("session-a"); return payload; } };
+    const client = { synthesize: async (_text: string, sessionId: string) => { calls += 1; expect(sessionId).toBe("session-a"); return payload; } };
     clearTtsPreparationCache(client);
     await act(async () => {
       root = create(createElement(TtsAudioPlayer, {

@@ -164,7 +164,7 @@ function normalText(
 export interface RenderAssistantBlocksOptions {
   streaming: boolean;
   interrupted: boolean;
-  sessionId?: string | undefined;
+  sessionId: string;
   mentions?: unknown | undefined;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;
@@ -262,7 +262,7 @@ interface AssistantMarkdownProps {
   blocks: readonly AssistantBlock[];
   streaming: boolean;
   interrupted: boolean;
-  sessionId?: string | undefined;
+  sessionId: string;
   mentions?: unknown;
   t: (key: string, params?: Record<string, unknown>) => string;
   client?: TtsRpcClient | undefined;

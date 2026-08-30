@@ -30,8 +30,8 @@ Kepos-published URL may play after that local setup, but its remote Settings
 card does not promise credential or voice writes.
 
 The host gateway uses the fixed `qwen3-tts-flash` model, Chinese language, and
-MP3 output. It accepts only the short text payload sent by the browser's
-trusted Connection RPC.
+MP3 output. It accepts the finalized passage and framework session identity
+sent by the browser's trusted Connection RPC.
 
 ## Audio cache
 
