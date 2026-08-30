@@ -100,7 +100,9 @@ describe("provider-neutral TTS gateway", () => {
     });
     const result = await gateway.synthesize({ sessionId: "session-a", text: "你好" });
     expect(result.bytes).toBe(3);
+    expect(BYTEDANCE_ENDPOINT).toBe("https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse");
     expect(request?.url).toBe(BYTEDANCE_ENDPOINT);
+    expect(request?.headers.get("accept")).toBe("text/event-stream");
     expect(request?.headers.get("x-api-key")).toBe("secret");
     expect(request?.headers.get("x-api-resource-id")).toBe(BYTEDANCE_RESOURCE_ID);
     expect(request?.headers.get("x-api-app-key")).toBeNull();

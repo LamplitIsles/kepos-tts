@@ -452,6 +452,7 @@ async function bytedanceBytes(
     response = await fetchImpl(BYTEDANCE_ENDPOINT, {
       method: "POST",
       headers: {
+        accept: "text/event-stream",
         "content-type": "application/json",
         "X-Api-Key": credential.value,
         "X-Api-Resource-Id": BYTEDANCE_RESOURCE_ID

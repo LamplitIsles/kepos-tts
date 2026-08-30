@@ -8,7 +8,7 @@ export const DASHSCOPE_ENDPOINT =
   "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 export const ALIBABA_MODEL = "qwen3-tts-flash";
 
-export const BYTEDANCE_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
+export const BYTEDANCE_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse";
 export const BYTEDANCE_RESOURCE_ID = "seed-tts-2.0";
 
 export const TTS_MAX_CHARS = 240;
