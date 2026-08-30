@@ -12,7 +12,7 @@ Configure the DashScope API key and persistent voice from a local loopback DSH
 Web Settings session. The card reports configured/source/writable state without
 rendering the key. A Kepos-published URL can play tagged TTS after that local
 setup, but its remote Settings card must not promise credential or voice
-writes; there is no remote configuration endpoint. A successful tagged passage
-appears as a manual Play control; Stop aborts a pending request and Replay uses
-already received MP3 bytes. If synthesis fails, the transcript stays visible in
-the conversation.
+writes; there is no remote configuration endpoint. When a tagged message
+completes, the browser immediately prepares its MP3 and replaces the tag with
+the browser's native audio player. If synthesis fails, the transcript stays
+visible in the conversation.

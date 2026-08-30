@@ -1,7 +1,7 @@
 {
   "name": "@lamplitisles/kepos-tts",
   "version": "0.1.0",
-  "description": "Manual Qwen Chinese text-to-speech controls for DeepSeek Harness Web",
+  "description": "Qwen Chinese tagged text-to-speech for DeepSeek Harness Web",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,7 +25,8 @@
     "dist",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "license": "Apache-2.0",
   "repository": {
@@ -81,6 +82,7 @@
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.3",
     "@types/react-test-renderer": "18.0.7",
+    "lightningcss": "^1.33.0",
     "react-test-renderer": "18.3.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",

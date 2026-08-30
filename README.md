@@ -1,16 +1,17 @@
 # kepos-tts
 
-Manual Chinese Qwen3-TTS Flash controls for DeepSeek Harness Web. The bundle
-adds an optional `[[tts:text]]...[[/tts:text]]` annotation to finalized
-assistant prose. A user must press Play; normal replies, malformed tags, and
-fenced examples remain ordinary visible text.
+Chinese Qwen3-TTS Flash for DeepSeek Harness Web. The bundle adds one optional
+audio-only `[[tts:text]]...[[/tts:text]]` block to a finalized assistant reply.
+When that message completes, it immediately prepares its MP3 and replaces the
+block with the browser's native audio player. Normal replies, malformed tags,
+and fenced examples remain ordinary visible text.
 
 ## Build and verify
 
 ```sh
 bun install
 bun run typecheck
-bun test
+bun run test
 bun run build
 bun run pack-smoke
 ```

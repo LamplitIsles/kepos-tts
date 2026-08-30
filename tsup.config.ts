@@ -1,4 +1,6 @@
 import { defineConfig } from "tsup";
+import type { Plugin as EsbuildPlugin } from "esbuild";
+import { compileCssModule } from "./scripts/css-modules.js";
 
 const dshExternals = [
   "@deepseek-ai/cordis",
@@ -25,6 +27,35 @@ const dshExternals = [
   "react/jsx-runtime"
 ];
 
+function cssModulesPlugin(): EsbuildPlugin {
+  return {
+    name: "kepos-tts-css-modules",
+    setup(build) {
+      // tsup consumes `.css` as a global stylesheet before esbuild plugins run.
+      // This extension routes the source through Lightning CSS's real module transform.
+      build.onLoad({ filter: /\.module\.dshcss$/ }, async (args) => {
+        const { css, classes } = await compileCssModule(args.path);
+        const styleId = "@lamplitisles/kepos-tts/tts.module.css";
+        return {
+          loader: "js",
+          contents: [
+            `const css = ${JSON.stringify(css)};`,
+            `const styleId = ${JSON.stringify(styleId)};`,
+            "if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css=\"${styleId}\"]`) === null) {",
+            "  const tag = document.createElement('style');",
+            "  tag.dataset.plugin = '@lamplitisles/kepos-tts';",
+            "  tag.dataset.pluginCss = styleId;",
+            "  tag.textContent = css;",
+            "  document.head.appendChild(tag);",
+            "}",
+            `export default ${JSON.stringify(classes)};`
+          ].join("\n")
+        };
+      });
+    }
+  };
+}
+
 export default defineConfig([
   {
     entry: {
@@ -45,7 +76,7 @@ export default defineConfig([
     target: "es2022",
     dts: true,
     clean: false,
-    loader: { ".css": "text" },
+    esbuildPlugins: [cssModulesPlugin()],
     external: dshExternals,
     outExtension: () => ({ js: ".js" }),
     banner: {

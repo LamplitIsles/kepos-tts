@@ -163,8 +163,9 @@ try {
   if (
     loaded?.id !== manifest.name ||
     typeof loaded.factory !== "function" ||
-    !clientCode.includes('.kepos-tts-reasoning-root[data-state="running"] .kepos-tts-reasoning-row::after') ||
-    !clientCode.includes("animation: 2.6s ease-out infinite kepos-tts-reasoning-row-sweep;") ||
+    !clientCode.includes('data-plugin-css') ||
+    !/\.[A-Za-z0-9]+_player audio\{width:100%;height:32px\}/.test(clientCode) ||
+    !clientCode.includes('"player":') ||
     clientCode.includes('require("@deepseek-ai/dsh-credentials")') ||
     clientCode.includes('require("@deepseek-ai/schemastery")')
   ) {

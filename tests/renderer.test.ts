@@ -9,20 +9,20 @@ const client: TtsRpcClient = { synthesize: async () => ({ mediaType: "audio/mpeg
 const t = (key: string) => key;
 
 describe("assistant renderer seam", () => {
-  it("interleaves one finalized pill and leaves ordinary markdown rendered", () => {
+  it("interleaves one finalized audio player and leaves ordinary markdown rendered", () => {
     const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
       { kind: "text", text: "普通 [[tts:text]]你好[[/tts:text]]。" }
     ], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna" })));
-    expect(html).toContain("kepos-tts-pill");
+    expect(html).toContain('data-tts-state="idle"');
     expect(html).toContain("普通");
-    expect(html).toContain("你好");
+    expect(html).not.toContain("[[tts:text]]");
   });
 
   it("does not expose a control while streaming or for ordinary text", () => {
     const streaming = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "[[tts:text]]稍后[[/tts:text]]" }], { streaming: true, interrupted: false, t, client, voiceKey: "onoAnna" })));
     const ordinary = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "只是回答" }], { streaming: false, interrupted: false, t, client, voiceKey: "onoAnna" })));
-    expect(streaming).not.toContain("kepos-tts-pill");
-    expect(ordinary).not.toContain("kepos-tts-pill");
+    expect(streaming).not.toContain("data-tts-state");
+    expect(ordinary).not.toContain("data-tts-state");
   });
 
   it("keeps the pinned Think row and native block path for untagged replies", () => {
@@ -36,6 +36,6 @@ describe("assistant renderer seam", () => {
     expect(html).toContain('data-disclosure-row="true"');
     expect(html).toContain("先判断");
     expect(html).toContain("普通回复");
-    expect(html).not.toContain("kepos-tts-pill");
+    expect(html).not.toContain("data-tts-state");
   });
 });

@@ -1,8 +1,9 @@
 import { createElement, useEffect, useRef, useSyncExternalStore } from "react";
 
 import type { BrowserAudioPayload } from "./rpc.js";
+import styles from "./client/tts.module.dshcss";
 
-export type TtsPlayerStatus = "idle" | "loading" | "playing" | "error";
+export type TtsPlayerStatus = "idle" | "loading" | "ready" | "error";
 
 export interface TtsPlayerSnapshot {
   status: TtsPlayerStatus;
@@ -13,27 +14,14 @@ export interface TtsRpcClient {
   synthesize(text: string, signal?: AbortSignal): Promise<BrowserAudioPayload>;
 }
 
-export interface AudioLike {
-  currentTime: number;
-  onended: (() => void) | null;
-  onerror: (() => void) | null;
-  play(): Promise<void> | void;
-  pause(): void;
-}
-
-export type AudioFactory = (url: string) => AudioLike;
-
-export interface TtsAudioPillProps {
+export interface TtsAudioPlayerProps {
   text: string;
   transcript?: string;
   voiceKey: string;
   client: TtsRpcClient;
-  audioFactory?: AudioFactory;
-  labels?: Partial<{ play: string; stop: string; replay: string; failed: string }>;
+  labels?: Partial<{ preparing: string; audio: string; failed: string }>;
   className?: string;
 }
-
-const defaultAudioFactory: AudioFactory = (url) => new Audio(url) as unknown as AudioLike;
 
 interface CachedAudio {
   text: string;
@@ -63,21 +51,16 @@ function revokeUrl(cached: CachedAudio | undefined): void {
   }
 }
 
-/** Manual, cancellable audio lifecycle used by each inline conversation pill. */
+/** Fetches tagged speech as soon as the finalized message mounts; playback remains native browser UI. */
 export class TtsPlayer {
   private snapshot: TtsPlayerSnapshot = { status: "idle" };
   private readonly listeners = new Set<() => void>();
   private request: AbortController | undefined;
-  private audio: AudioLike | undefined;
   private cached: CachedAudio | undefined;
-  private stale: CachedAudio[] = [];
   private generation = 0;
   private disposed = false;
 
-  constructor(
-    private readonly client: TtsRpcClient,
-    private readonly audioFactory: AudioFactory = defaultAudioFactory
-  ) {}
+  constructor(private readonly client: TtsRpcClient) {}
 
   getSnapshot = (): TtsPlayerSnapshot => this.snapshot;
 
@@ -91,83 +74,25 @@ export class TtsPlayer {
     for (const listener of this.listeners) listener();
   }
 
-  private pauseAudio(): void {
-    if (!this.audio) return;
-    this.audio.onended = null;
-    this.audio.onerror = null;
-    try {
-      this.audio.pause();
-    } catch {
-      // Browser audio implementations are allowed to throw during teardown.
-    }
-    this.audio = undefined;
-    for (const cached of this.stale.splice(0)) revokeUrl(cached);
-  }
-
-  private drainStale(): void {
-    for (const cached of this.stale.splice(0)) revokeUrl(cached);
-  }
-
-  setVoiceKey(voiceKey: string): void {
-    if (this.cached && this.cached.voiceKey !== voiceKey) {
-      if (this.audio) this.stale.push(this.cached);
-      else revokeUrl(this.cached);
-      this.cached = undefined;
-    }
-  }
-
   hasCached(text: string, voiceKey: string): boolean {
     return this.cached?.text === text && this.cached.voiceKey === voiceKey;
   }
 
-  stop(): void {
-    this.generation += 1;
-    this.request?.abort();
-    this.request = undefined;
-    this.pauseAudio();
-    if (!this.disposed) this.publish({ status: "idle" });
+  preparedUrl(text: string, voiceKey: string): string | undefined {
+    return this.hasCached(text, voiceKey) ? this.cached?.url : undefined;
   }
 
-  private async playUrl(url: string, generation: number): Promise<void> {
-    if (this.disposed || generation !== this.generation) return;
-    const audio = this.audioFactory(url);
-    this.audio = audio;
-    audio.onended = () => {
-      if (generation !== this.generation || this.disposed) return;
-      this.audio = undefined;
-      this.drainStale();
-      this.publish({ status: "idle" });
-    };
-    audio.onerror = () => {
-      if (generation !== this.generation || this.disposed) return;
-      this.audio = undefined;
-      this.drainStale();
-      this.publish({ status: "error", error: "audio-playback" });
-    };
-    this.publish({ status: "playing" });
-    try {
-      await audio.play();
-    } catch {
-      if (generation !== this.generation || this.disposed) return;
-      this.audio = undefined;
-      this.publish({ status: "error", error: "audio-playback" });
-    }
-  }
-
-  async play(text: string, voiceKey: string): Promise<void> {
+  async prepare(text: string, voiceKey: string): Promise<void> {
     if (this.disposed) return;
+    if (this.hasCached(text, voiceKey)) {
+      this.publish({ status: "ready" });
+      return;
+    }
     const generation = ++this.generation;
     this.request?.abort();
     this.request = undefined;
-    this.pauseAudio();
-    if (this.cached?.text === text && this.cached.voiceKey === voiceKey) {
-      await this.playUrl(this.cached.url, generation);
-      return;
-    }
-    if (this.cached) {
-      revokeUrl(this.cached);
-      this.cached = undefined;
-    }
+    revokeUrl(this.cached);
+    this.cached = undefined;
     const controller = new AbortController();
     this.request = controller;
     this.publish({ status: "loading" });
@@ -175,9 +100,8 @@ export class TtsPlayer {
       const payload = await this.client.synthesize(text, controller.signal);
       if (controller.signal.aborted || generation !== this.generation || this.disposed) return;
       this.request = undefined;
-      const generated = payloadUrl(payload);
-      this.cached = { text, voiceKey, ...generated };
-      await this.playUrl(generated.url, generation);
+      this.cached = { text, voiceKey, ...payloadUrl(payload) };
+      this.publish({ status: "ready" });
     } catch (error) {
       if (controller.signal.aborted || generation !== this.generation || this.disposed) return;
       this.request = undefined;
@@ -191,54 +115,58 @@ export class TtsPlayer {
     this.generation += 1;
     this.request?.abort();
     this.request = undefined;
-    this.pauseAudio();
     revokeUrl(this.cached);
     this.cached = undefined;
-    this.drainStale();
     this.listeners.clear();
   }
 }
 
-export function TtsAudioPill({
+export function TtsAudioPlayer({
   text,
   transcript = text,
   voiceKey,
   client,
-  audioFactory = defaultAudioFactory,
   labels,
   className
-}: TtsAudioPillProps) {
+}: TtsAudioPlayerProps) {
   const playerRef = useRef<TtsPlayer | null>(null);
-  if (!playerRef.current) playerRef.current = new TtsPlayer(client, audioFactory);
+  if (!playerRef.current) playerRef.current = new TtsPlayer(client);
   const player = playerRef.current;
+  const preparationRef = useRef<{ text: string; voiceKey: string } | null>(null);
+  if (!preparationRef.current) preparationRef.current = { text, voiceKey };
+  const preparation = preparationRef.current;
   const snapshot = useSyncExternalStore(player.subscribe, player.getSnapshot, player.getSnapshot);
   useEffect(() => {
-    player.setVoiceKey(voiceKey);
-  }, [player, voiceKey]);
+    void player.prepare(preparation.text, preparation.voiceKey);
+  }, [player, preparation]);
   useEffect(() => () => player.dispose(), [player]);
 
-  const action = snapshot.status === "playing" || snapshot.status === "loading"
-    ? "stop"
-    : player.hasCached(text, voiceKey) ? "replay" : "play";
-  const actionLabel = labels?.[action] ?? (action === "stop" ? "Stop" : action === "replay" ? "Replay" : "Play");
-  const onClick = () => {
-    if (action === "stop") player.stop();
-    else void player.play(text, voiceKey);
-  };
+  const src = player.preparedUrl(preparation.text, preparation.voiceKey);
+  const classes = [styles.player, className].filter(Boolean).join(" ");
+  if (snapshot.status === "ready" && src) {
+    return createElement(
+      "div",
+      { className: classes, "data-tts-state": snapshot.status },
+      createElement("span", { className: styles.playerLabel }, labels?.audio ?? "Audio message"),
+      createElement("audio", {
+        controls: true,
+        preload: "metadata",
+        src,
+        "aria-label": `${labels?.audio ?? "Audio message"}: ${transcript}`
+      })
+    );
+  }
+  if (snapshot.status === "error") {
+    return createElement(
+      "div",
+      { className: classes, "data-tts-state": snapshot.status },
+      createElement("span", { className: styles.transcript, "data-tts-transcript": true }, transcript),
+      createElement("span", { className: styles.error, role: "status" }, labels?.failed ?? "Audio unavailable; transcript shown.")
+    );
+  }
   return createElement(
-    "span",
-    { className: ["kepos-tts-pill", className].filter(Boolean).join(" "), "data-tts-state": snapshot.status },
-    createElement("button", {
-      type: "button",
-      className: "kepos-tts-button",
-      onClick,
-      "aria-label": `${actionLabel}: ${transcript}`,
-      "aria-busy": snapshot.status === "loading",
-      disabled: false
-    }, actionLabel),
-    createElement("span", { className: "kepos-tts-transcript", "data-tts-transcript": true }, transcript),
-    snapshot.status === "error"
-      ? createElement("span", { className: "kepos-tts-error", role: "status" }, labels?.failed ?? "Audio unavailable; transcript shown.")
-      : null
+    "div",
+    { className: classes, "data-tts-state": snapshot.status, "aria-busy": true },
+    createElement("span", { className: styles.preparing, role: "status" }, labels?.preparing ?? "Preparing audio…")
   );
 }

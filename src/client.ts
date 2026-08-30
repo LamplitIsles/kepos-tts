@@ -17,14 +17,14 @@ import {
 import { TtsAssistantNodeView, type VoiceSource } from "./client/assistant-node.js";
 import { TtsSettingsCard, decodeSettings, type ClientSettingsScope, type CredentialApi } from "./client/settings-card.js";
 import type { TtsRpcClient } from "./player.js";
-import styleText from "./client/tts.module.css";
 
 export const inject = ["connection", "locale", "settingsScope", "slots"] as const;
 
 export type TtsLocaleKey =
   | "title" | "description" | "voice" | "apiKey" | "configured" | "source" | "writable"
   | "unavailable" | "save" | "remove" | "saved" | "failed" | "message.reasoning"
-  | "message.unknownBlock" | "message.stopped" | "json.truncated" | "row.running";
+  | "message.unknownBlock" | "message.stopped" | "message.preparingAudio" | "message.audio"
+  | "message.audioUnavailable" | "json.truncated" | "row.running";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
@@ -34,7 +34,7 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 
 const en: Record<TtsLocaleKey, string> = {
   title: "Qwen voice",
-  description: "Choose the voice used when you manually play a tagged assistant passage.",
+  description: "Choose the voice used to prepare tagged assistant passages.",
   voice: "Voice",
   apiKey: "DashScope API key",
   configured: "Configured",
@@ -48,13 +48,16 @@ const en: Record<TtsLocaleKey, string> = {
   "message.reasoning": "Reasoning",
   "message.unknownBlock": "Unknown message block",
   "message.stopped": "Stopped",
+  "message.preparingAudio": "Preparing audio…",
+  "message.audio": "Audio message",
+  "message.audioUnavailable": "Audio unavailable; transcript shown.",
   "json.truncated": "Showing {total} items",
   "row.running": "Running"
 };
 
 const zh: Record<TtsLocaleKey, string> = {
   title: "Qwen 语音",
-  description: "选择手动播放助手标记片段时使用的声音。",
+  description: "选择用于预取助手标记片段的声音。",
   voice: "声音",
   apiKey: "DashScope API 密钥",
   configured: "已配置",
@@ -68,20 +71,12 @@ const zh: Record<TtsLocaleKey, string> = {
   "message.reasoning": "推理",
   "message.unknownBlock": "未知消息块",
   "message.stopped": "已停止",
+  "message.preparingAudio": "正在准备音频…",
+  "message.audio": "语音消息",
+  "message.audioUnavailable": "音频不可用；已显示文字。",
   "json.truncated": "显示 {total} 项",
   "row.running": "运行中"
 };
-
-function installStyles(): () => void {
-  if (typeof document === "undefined") return () => undefined;
-  const existing = document.querySelector('style[data-dsh-plugin="kepos-tts"]');
-  if (existing) return () => undefined;
-  const style = document.createElement("style");
-  style.dataset.dshPlugin = "kepos-tts";
-  style.textContent = styleText;
-  document.head.append(style);
-  return () => style.remove();
-}
 
 export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): TtsRpcClient {
   return {
@@ -116,7 +111,6 @@ export function createVoiceSource(scope: Pick<SettingsScope<Partial<QwenTtsSetti
 }
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => installStyles(), "kepos-tts: styles");
   ctx.effect(() => ctx.locale.register(SETTINGS_NAMESPACE, { en, zh }), "kepos-tts: dictionaries");
 
   const scope = ctx.settingsScope.bind<Partial<QwenTtsSettings>>({
@@ -160,7 +154,7 @@ export function apply(ctx: ClientContext): void {
   ));
 }
 
-export { TtsAudioPill, TtsPlayer } from "./player.js";
+export { TtsAudioPlayer, TtsPlayer } from "./player.js";
 export { TtsSettingsCard, decodeSettings, describeCredential, saveCredential, removeCredential } from "./client/settings-card.js";
 export { TtsAssistantNodeView, renderAssistantBlocks } from "./client/assistant-node.js";
 

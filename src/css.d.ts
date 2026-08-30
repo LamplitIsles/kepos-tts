@@ -1,4 +1,4 @@
-declare module "*.css" {
-  const cssText: string;
-  export default cssText;
+declare module "*.module.dshcss" {
+  const classes: Readonly<Record<string, string>>;
+  export default classes;
 }

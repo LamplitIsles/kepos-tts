@@ -15,7 +15,8 @@ import type { AssistantBlock } from "@deepseek-ai/dsh-client-runtime/client";
 import type { ChatNodeViewProps, RenderMessageImages } from "@deepseek-ai/dsh-client-ui-conversation/client";
 
 import { parseTaggedText, type TaggedTextSegment } from "../parser.js";
-import { TtsAudioPill, type TtsRpcClient } from "../player.js";
+import { TtsAudioPlayer, type TtsRpcClient } from "../player.js";
+import styles from "./tts.module.dshcss";
 
 // The block-family presentation below adapts the MIT-licensed
 // AssistantMarkdown/ReasoningRow presentation from the pinned DSH
@@ -108,16 +109,16 @@ function ReasoningRow({ text, running, t }: ReasoningRowProps): ReactNode {
   return createElement(
     "div",
     {
-      className: "kepos-tts-reasoning-root",
+      className: styles.reasoningRoot,
       "data-variant": "think",
       "data-state": running ? "running" : "ok"
     },
-    running ? createElement("span", { className: "kepos-tts-visually-hidden" }, t("row.running")) : null,
+    running ? createElement("span", { className: styles.visuallyHidden }, t("row.running")) : null,
     createElement(DisclosureRow, {
-      rowClassName: "kepos-tts-reasoning-row",
-      leadingClassName: "kepos-tts-reasoning-leading",
-      titleClassName: "kepos-tts-reasoning-title",
-      chevronClassName: "kepos-tts-reasoning-chevron",
+      rowClassName: styles.reasoningRow,
+      leadingClassName: styles.reasoningLeading,
+      titleClassName: styles.reasoningTitle,
+      chevronClassName: styles.reasoningChevron,
       icon: createElement(IconThinkOutline14, { size: 14 }),
       title: "Think",
       open: expanded,
@@ -127,18 +128,18 @@ function ReasoningRow({ text, running, t }: ReasoningRowProps): ReactNode {
       collapsedContent: createElement(
         Fragment,
         null,
-        createElement("span", { className: "kepos-tts-reasoning-separator", "aria-hidden": true }),
+        createElement("span", { className: styles.reasoningSeparator, "aria-hidden": true }),
         createElement(
           "span",
           {
             ref: summaryRef,
-            className: "kepos-tts-reasoning-summary",
+            className: styles.reasoningSummary,
             "data-follow-end": running || undefined
           },
           summary
         )
       ),
-      children: createElement("div", { className: "kepos-tts-reasoning-body" }, text)
+      children: createElement("div", { className: styles.reasoningBody }, text)
     })
   );
 }
@@ -186,12 +187,17 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
           claimed = true;
           parsed.segments.forEach((segment, segmentIndex) => {
             if (segment.kind === "tts") {
-              rendered.push(createElement(TtsAudioPill, {
+              rendered.push(createElement(TtsAudioPlayer, {
                 key: `${index}-tts`,
                 text: segment.text,
                 transcript: segment.transcript,
                 voiceKey: options.voiceKey!,
-                client: options.client!
+                client: options.client!,
+                labels: {
+                  preparing: options.t("message.preparingAudio", { default: "Preparing audio…" }),
+                  audio: options.t("message.audio", { default: "Audio message" }),
+                  failed: options.t("message.audioUnavailable", { default: "Audio unavailable; transcript shown." })
+                }
               }));
             } else {
               rendered.push(normalText(
@@ -245,7 +251,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
     }));
   }
   if (options.interrupted) {
-    rendered.push(createElement("span", { className: "kepos-tts-stopped", key: "stopped" }, options.t("message.stopped", { default: "Stopped" })));
+    rendered.push(createElement("span", { className: styles.stopped, key: "stopped" }, options.t("message.stopped", { default: "Stopped" })));
   }
   return rendered;
 }
@@ -279,10 +285,10 @@ function AssistantMarkdown({
   if (!(streaming || interrupted || blocks.some((block) => block.kind !== "tool-call"))) return null;
   return createElement(
     "div",
-    { className: "kepos-tts-assistant", "data-streaming": streaming || undefined },
+    { className: styles.assistant, "data-streaming": streaming || undefined },
     createElement(
       "div",
-      { className: "kepos-tts-assistant-body" },
+      { className: styles.assistantBody },
       renderAssistantBlocks(blocks, {
         streaming,
         interrupted,

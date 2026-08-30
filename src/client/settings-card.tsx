@@ -12,6 +12,7 @@ import {
   type QwenTtsSettings,
   type VoiceId
 } from "../constants.js";
+import styles from "./tts.module.dshcss";
 
 export type ClientSettingsScope = SettingsScope<Partial<QwenTtsSettings>>;
 
@@ -179,7 +180,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
 
   const text = {
     title: t?.("title") ?? "Qwen voice",
-    description: t?.("description") ?? "Choose the voice used when you manually play a tagged assistant passage.",
+    description: t?.("description") ?? "Choose the voice used to prepare tagged assistant passages.",
     voice: t?.("voice") ?? "Voice",
     apiKey: t?.("apiKey") ?? "DashScope API key",
     configured: t?.("configured") ?? "Configured",
@@ -196,23 +197,23 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
 
   return createElement(
     "section",
-    { className: "kepos-tts-settings-card", "aria-labelledby": `${SETTINGS_NAMESPACE}-title` },
-    createElement("p", { className: "kepos-tts-eyebrow" }, "MANUAL SPEECH"),
-    createElement("h2", { className: "kepos-tts-title", id: `${SETTINGS_NAMESPACE}-title` }, text.title),
-    createElement("p", { className: "kepos-tts-description" }, text.description),
+    { className: styles.settingsCard, "aria-labelledby": `${SETTINGS_NAMESPACE}-title` },
+    createElement("p", { className: styles.eyebrow }, "TAGGED SPEECH"),
+    createElement("h2", { className: styles.title, id: `${SETTINGS_NAMESPACE}-title` }, text.title),
+    createElement("p", { className: styles.description }, text.description),
     createElement(
       "label",
-      { className: "kepos-tts-label", htmlFor: `${SETTINGS_NAMESPACE}-voice` },
+      { className: styles.label, htmlFor: `${SETTINGS_NAMESPACE}-voice` },
       text.voice,
       createElement(
         "select",
-        { id: `${SETTINGS_NAMESPACE}-voice`, className: "kepos-tts-select", value: voice, onChange: selectVoice, disabled: busy || snapshot.status === "unavailable" || !canWriteSettings },
+        { id: `${SETTINGS_NAMESPACE}-voice`, className: styles.select, value: voice, onChange: selectVoice, disabled: busy || snapshot.status === "unavailable" || !canWriteSettings },
         VOICE_IDS.map((id) => createElement("option", { key: id, value: id }, VOICE_LABELS[id]))
       )
     ),
     createElement(
       "dl",
-      { className: "kepos-tts-credential-status", "aria-label": text.apiKey },
+      { className: styles.credentialStatus, "aria-label": text.apiKey },
       createElement("dt", null, text.configured),
       createElement("dd", { "data-configured": credentialState }, credential.configured ? "yes" : "no"),
       createElement("dt", null, text.source),
@@ -223,11 +224,11 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     canWrite
       ? createElement(
         "form",
-        { className: "kepos-tts-key-form", onSubmit: saveKey },
-        createElement("label", { className: "kepos-tts-label", htmlFor: `${SETTINGS_NAMESPACE}-key` }, text.apiKey),
+        { className: styles.keyForm, onSubmit: saveKey },
+        createElement("label", { className: styles.label, htmlFor: `${SETTINGS_NAMESPACE}-key` }, text.apiKey),
         createElement("input", {
           id: `${SETTINGS_NAMESPACE}-key`,
-          className: "kepos-tts-key-input",
+          className: styles.keyInput,
           type: "password",
           value: draftKey,
           onChange: (event: { target: { value: string } }) => setDraftKey(event.target.value),
@@ -236,13 +237,13 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
           disabled: busy,
           "aria-label": text.apiKey
         }),
-        createElement("button", { className: "kepos-tts-action", type: "submit", disabled: busy || !draftKey.trim() }, text.save),
+        createElement("button", { className: styles.action, type: "submit", disabled: busy || !draftKey.trim() }, text.save),
         credential.configured
-          ? createElement("button", { className: "kepos-tts-action kepos-tts-action-secondary", type: "button", onClick: removeKey, disabled: busy }, text.remove)
+          ? createElement("button", { className: `${styles.action} ${styles.actionSecondary}`, type: "button", onClick: removeKey, disabled: busy }, text.remove)
           : null
       )
-      : createElement("p", { className: "kepos-tts-unavailable", role: "status" }, text.unavailable),
-    feedback === "saved" ? createElement("p", { className: "kepos-tts-feedback", role: "status" }, text.saved) : null,
-    feedback === "failed" ? createElement("p", { className: "kepos-tts-feedback", role: "alert" }, text.failed) : null
+      : createElement("p", { className: styles.unavailable, role: "status" }, text.unavailable),
+    feedback === "saved" ? createElement("p", { className: styles.feedback, role: "status" }, text.saved) : null,
+    feedback === "failed" ? createElement("p", { className: styles.feedback, role: "alert" }, text.failed) : null
   );
 }
