@@ -107,9 +107,10 @@ describe("provider-neutral TTS gateway", () => {
     expect(request?.body).toEqual({ user: { uid: "kepos-tts" }, req_params: { text: "你好", speaker: "zh_custom", audio_params: { format: "mp3", sample_rate: 24000 } } });
   });
 
-  it("concatenates newline and SSE frames and accepts a completion frame", async () => {
+  it("concatenates adjacent, newline, and SSE frames and accepts a completion frame", async () => {
     const cwd = await workspace();
     for (const body of [
+      '{"code":0,"message":"literal }{ inside a string","data":"SUQ="}{"code":0,"data":"M0E="}{"code":20000000}',
       '{"code":0,"data":"SUQ="}\n{"code":0,"data":"M0E="}\n{"code":20000000}',
       'data: {"code":0,"data":"SUQ="}\n\ndata: {"code":0,"data":"M0E="}\ndata: {"code":20000000}\n'
     ]) {

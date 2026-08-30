@@ -370,16 +370,54 @@ function asFrame(value: unknown): ByteDanceFrame | undefined {
   return { ...(code === undefined ? {} : { code }), ...(data === undefined ? {} : { data }), ...(message === undefined ? {} : { message }) };
 }
 
-/** Parse one JSON response or newline/SSE `data:` JSON frames. */
+function parseAdjacentJsonFrames(text: string): ByteDanceFrame[] | undefined {
+  const frames: ByteDanceFrame[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (depth === 0) {
+      if (/\s/u.test(character)) continue;
+      if (character !== "{") return undefined;
+      start = index;
+      depth = 1;
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character !== "}") continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+    try {
+      const frame = asFrame(JSON.parse(text.slice(start, index + 1)));
+      if (!frame) return undefined;
+      frames.push(frame);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return depth === 0 && !inString && frames.length > 0 ? frames : undefined;
+}
+
+/** Parse adjacent or newline JSON objects and SSE `data:` frames. */
 export function parseByteDanceFrames(text: string): ByteDanceFrame[] | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
-  try {
-    const frame = asFrame(JSON.parse(trimmed));
-    return frame ? [frame] : undefined;
-  } catch {
-    // The unidirectional endpoint may return one frame per line.
-  }
+  const adjacent = parseAdjacentJsonFrames(trimmed);
+  if (adjacent) return adjacent;
   const frames: ByteDanceFrame[] = [];
   for (const line of trimmed.split(/\r?\n/)) {
     const item = line.trim();
