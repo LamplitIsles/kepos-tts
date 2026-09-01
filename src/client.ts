@@ -1,9 +1,14 @@
 import { createElement } from "react";
-import type { ClientContext, SettingsScope } from "@deepseek-ai/dsh-client-runtime/client";
+import type { Context as ClientContext } from "@deepseek-ai/cordis";
+import type { SettingsScope } from "@deepseek-ai/dsh-client-ui-settings/client";
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 import type {} from "@deepseek-ai/dsh-client-connection/client";
 import type {} from "@deepseek-ai/dsh-client-locale/client";
+import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type {} from "@deepseek-ai/dsh-client-ui-chat/client";
+import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
+import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client";
 import type {} from "@deepseek-ai/dsh-client-ui-settings-plugins/client";
 import type {} from "@deepseek-ai/dsh-client-ui-slots";
@@ -18,12 +23,13 @@ import { TtsAssistantNodeView, type ProfileSource } from "./client/assistant-nod
 import { TtsSettingsCard, decodeSettings, type ClientSettingsScope, type CredentialApi } from "./client/settings-card.js";
 import type { TtsRpcClient } from "./player.js";
 
-export const inject = ["connection", "locale", "settingsScope", "slots"] as const;
+export const inject = ["connection", "locale", "remote", "remote.credentials", "settingsScope", "slots"] as const;
 
 export type TtsLocaleKey =
   | "title" | "description" | "provider" | "providerHint" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
   | "configured" | "notConfigured" | "expand" | "collapse" | "unsaved" | "save"
   | "saving" | "discard" | "saveFailed" | "readOnly" | "voiceRequired" | "voiceTooLong" | "message.reasoning"
+  | "copy" | "copied" | "markdown.footnotes"
   | "message.unknownBlock" | "message.stopped" | "message.preparingAudio" | "message.audio"
   | "message.audioUnavailable" | "json.truncated" | "row.running";
 
@@ -54,6 +60,9 @@ const en: Record<TtsLocaleKey, string> = {
   readOnly: "This deployment is read-only.",
   voiceRequired: "Voice ID is required.",
   voiceTooLong: "Voice ID must be 128 characters or fewer.",
+  copy: "Copy",
+  copied: "Copied",
+  "markdown.footnotes": "Footnotes",
   "message.reasoning": "Reasoning",
   "message.unknownBlock": "Unknown message block",
   "message.stopped": "Stopped",
@@ -85,6 +94,9 @@ const zh: Record<TtsLocaleKey, string> = {
   readOnly: "此部署为只读。",
   voiceRequired: "声音 ID 不能为空。",
   voiceTooLong: "声音 ID 不能超过 128 个字符。",
+  copy: "复制",
+  copied: "已复制",
+  "markdown.footnotes": "脚注",
   "message.reasoning": "推理",
   "message.unknownBlock": "未知消息块",
   "message.stopped": "已停止",
@@ -140,8 +152,9 @@ export function apply(ctx: ClientContext): void {
     namespace: SETTINGS_NAMESPACE,
     decode: decodeSettings
   }) as ClientSettingsScope;
-  const clientContext = ctx as unknown as ClientContext & { connection: ConnectionHandle & { api: CredentialApi } };
+  const clientContext = ctx as unknown as ClientContext & { connection: ConnectionHandle; remote: { credentials: CredentialApi["credentials"] } };
   const connection = clientContext.connection;
+  const api: CredentialApi = { credentials: clientContext.remote.credentials };
   const profileSource = createProfileSource(scope);
   ctx.effect(() => () => profileSource.dispose(), "kepos-tts: profile settings observer");
   const client = createTtsRpcClient(connection);
@@ -157,7 +170,7 @@ export function apply(ctx: ClientContext): void {
     ((props: Record<string, unknown>) => createElement(TtsSettingsCard, {
       ...props,
       scope,
-      api: connection.api,
+      api,
       localOnly: connection.isLoopback
     } as never)) as never
   ));

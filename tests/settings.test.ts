@@ -25,6 +25,23 @@ function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, re
   const settings: ClientSettingsScope = {
     getSnapshot: () => currentSnapshot,
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    mutate: async (ops) => {
+      for (const op of ops) {
+        const field = op.path[0];
+        if (field === undefined) continue;
+        if (op.op === "set") {
+          writes.push([field, op.value]);
+          if (rejectFields.has(field)) throw new Error("rejected");
+          currentSnapshot = { ...currentSnapshot, value: { ...currentSnapshot.value, [field]: op.value } };
+        } else {
+          writes.push([field, undefined]);
+          const value = { ...currentSnapshot.value };
+          delete value[field as keyof typeof value];
+          currentSnapshot = { ...currentSnapshot, value };
+        }
+      }
+      listeners.forEach((listener) => listener());
+    },
     set: async (field, value) => {
       writes.push([field, value]);
       if (rejectFields.has(field)) throw new Error("rejected");
@@ -45,8 +62,8 @@ function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, re
 function apiFor(statuses: Partial<Record<string, { configured: boolean; writable: boolean }>> = {}, writes: unknown[] = [], reject = false) {
   return {
     credentials: {
-      describe: async (payload: { refs: string[] }) => ({ result: { ok: true, value: { credentials: Object.fromEntries(payload.refs.map((ref) => [ref, statuses[ref] ?? { configured: false, writable: true }])) } } }),
-      set: async (payload: unknown) => { writes.push(["set", payload]); if (reject) throw new Error("rejected"); return { result: { ok: true, value: {} } }; }
+      describe: async (refs: string[]) => ({ ok: true, value: Object.fromEntries(refs.map((ref) => [ref, statuses[ref] ?? { configured: false, writable: true }])) }),
+      set: async (ref: string, value: string) => { writes.push(["set", { ref, value }]); if (reject) throw new Error("rejected"); return { ok: true, value: undefined }; }
     }
   };
 }
@@ -65,12 +82,12 @@ describe("dual-provider native settings card", () => {
     const writes: unknown[] = [];
     const api = {
       credentials: {
-        describe: async (payload: unknown) => { calls.push(payload); return { result: { ok: true, value: { credentials: { [ALIBABA_CREDENTIAL_REF]: { configured: true, source: "file", writable: true } } } } }; },
-        set: async (payload: unknown) => { writes.push(payload); return { result: { ok: true, value: {} } }; }
+        describe: async (refs: string[]) => { calls.push(refs); return { ok: true, value: { [ALIBABA_CREDENTIAL_REF]: { configured: true, source: "file", writable: true } } }; },
+        set: async (ref: string, value: string) => { writes.push({ ref, value }); return { ok: true, value: undefined }; }
       }
     };
     await expect(describeCredential(api)).resolves.toEqual({ configured: true, source: "file", writable: true });
-    expect(calls).toEqual([{ refs: [ALIBABA_CREDENTIAL_REF] }]);
+    expect(calls).toEqual([[ALIBABA_CREDENTIAL_REF]]);
     await expect(describeCredential(api, BYTEDANCE_CREDENTIAL_REF)).resolves.toEqual({ configured: false, writable: false });
     await saveCredential(api, "new-secret", BYTEDANCE_CREDENTIAL_REF);
     expect(writes).toEqual([{ ref: BYTEDANCE_CREDENTIAL_REF, value: "new-secret" }]);

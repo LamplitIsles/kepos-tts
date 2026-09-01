@@ -24,10 +24,19 @@ function dshEntry(): string {
   }
   const entry = realpathSync(cli);
   if (!existsSync(entry)) throw new Error(`DSH CLI target does not exist: ${entry}`);
+  let version = "";
+  try {
+    version = execFileSync(process.execPath, ["--expose-internals", entry, "--version"], { encoding: "utf8" }).trim();
+  } catch {
+    throw new Error("pack-smoke could not query the installed DSH CLI version");
+  }
+  if (version !== "0.1.2-alpha.3") {
+    throw new Error(`pack-smoke requires DSH 0.1.2-alpha.3, found ${version || "unknown"}`);
+  }
   return entry;
 }
 
-function startRuntime(entry: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ child: ChildProcess; baseUrl: string }> {
+function startRuntime(entry: string, env: NodeJS.ProcessEnv, cwd: string): Promise<{ child: ChildProcess; baseUrl: string; launchUrl: string }> {
   const child = spawn(process.execPath, ["--expose-internals", entry, "--profile", "web", "--host", "127.0.0.1", "--port", "0", "--no-open"], {
     cwd,
     env,
@@ -42,12 +51,12 @@ function startRuntime(entry: string, env: NodeJS.ProcessEnv, cwd: string): Promi
       settled = true;
       if (timer) clearTimeout(timer);
       if (error) rejectRuntime(error);
-      else if (baseUrl) resolveRuntime({ child, baseUrl });
+      else if (baseUrl) resolveRuntime({ child, baseUrl: new URL(baseUrl).origin, launchUrl: baseUrl });
       else rejectRuntime(new Error("DSH Web runtime exited without a URL"));
     };
     const readOutput = (chunk: Buffer | string) => {
       output += chunk.toString();
-      const match = output.match(/dsh web:\s+(https?:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/dsh web:\s+(https?:\/\/127\.0\.0\.1:\d+(?:\/\?token=[^\s\r\n]+)?)/);
       if (match?.[1]) finish(undefined, match[1]);
     };
     child.stdout?.on("data", readOutput);
@@ -103,10 +112,10 @@ async function stopRuntime(child: ChildProcess): Promise<void> {
   });
 }
 
-async function jsonRequest(baseUrl: string, path: string, body: unknown): Promise<{ response: Response; value: unknown }> {
+async function jsonRequest(baseUrl: string, path: string, body: unknown, cookie: string): Promise<{ response: Response; value: unknown }> {
   const response = await fetch(new URL(path, baseUrl), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie },
     body: JSON.stringify(body)
   });
   const text = await response.text();
@@ -119,8 +128,16 @@ async function jsonRequest(baseUrl: string, path: string, body: unknown): Promis
   return { response, value };
 }
 
+async function authenticateRuntime(runtime: { launchUrl: string }): Promise<string> {
+  const response = await fetch(runtime.launchUrl, { redirect: "manual" });
+  if (response.status !== 303) throw new Error(`DSH Web launch URL returned ${response.status} instead of a browser-auth redirect`);
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  if (!cookie) throw new Error("DSH Web launch URL did not issue a browser-auth cookie");
+  return cookie;
+}
+
 const temp = mkdtempSync(join(tmpdir(), "kepos-tts-pack-"));
-let runtime: { child: ChildProcess; baseUrl: string } | undefined;
+let runtime: { child: ChildProcess; baseUrl: string; launchUrl: string } | undefined;
 try {
   const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temp], { cwd: root, encoding: "utf8" })) as Array<{ filename: string }>;
   const tarball = join(temp, packed[0]!.filename);
@@ -144,10 +161,28 @@ try {
   const packageDir = join(install, "node_modules", "@lamplitisles", "kepos-tts");
   const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
     name: string;
-    dsh?: { client?: { platform?: string } };
+    peerDependencies?: Record<string, string>;
+    dsh?: { client?: { platform?: string; inject?: string[] } };
   };
   if (manifest.name !== "@lamplitisles/kepos-tts" || manifest.dsh?.client?.platform !== "web") {
     throw new Error("installed manifest does not describe the DSH Web bundle");
+  }
+  if (manifest.peerDependencies?.["@deepseek-ai/cordis"] !== "4.0.2") {
+    throw new Error("packed manifest is not pinned to Cordis 4.0.2");
+  }
+  for (const [name, version] of Object.entries(manifest.peerDependencies ?? {})) {
+    if (name.startsWith("@deepseek-ai/dsh-") && version !== "0.1.2-alpha.3") {
+      throw new Error(`packed manifest has a non-alpha DSH peer: ${name}@${version}`);
+    }
+  }
+  const injected = manifest.dsh?.client?.inject ?? [];
+  for (const required of ["@deepseek-ai/dsh-client-ui-chat", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-session"]) {
+    if (!injected.includes(required)) throw new Error(`packed manifest is missing alpha client service ${required}`);
+  }
+  for (const obsolete of ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-host-apiproxy"]) {
+    if (injected.includes(obsolete) || Object.hasOwn(manifest.peerDependencies ?? {}, obsolete)) {
+      throw new Error(`packed manifest still references obsolete DSH service ${obsolete}`);
+    }
   }
 
   const patch = readFileSync(join(packageDir, "cordis.patch.yml"), "utf8");
@@ -156,7 +191,8 @@ try {
   }
 
   runtime = await startRuntime(entry, env, runtimeCwd);
-  const homePage = await fetch(runtime.baseUrl);
+  const cookie = await authenticateRuntime(runtime);
+  const homePage = await fetch(new URL("/", runtime.baseUrl), { headers: { cookie } });
   if (!homePage.ok) throw new Error(`installed DSH Web runtime returned ${homePage.status} for /`);
   const html = await homePage.text();
   const bootStart = html.indexOf('globalThis["__DSH_BOOT__"]');
@@ -169,7 +205,7 @@ try {
   const pluginEntry = boot.entries?.find((candidate) => candidate.id === manifest.name);
   if (!pluginEntry?.url) throw new Error("installed plugin is absent from the DSH Web bootstrap entries");
 
-  const clientResponse = await fetch(new URL(pluginEntry.url, runtime.baseUrl));
+  const clientResponse = await fetch(new URL(pluginEntry.url, runtime.baseUrl), { headers: { cookie } });
   if (!clientResponse.ok) throw new Error(`installed DSH client bundle returned ${clientResponse.status}`);
   const clientCode = await clientResponse.text();
   let loaded: { id?: string; factory?: unknown } | undefined;
@@ -186,7 +222,9 @@ try {
     clientCode.includes("revokeObjectURL") ||
     clientCode.includes("data:audio/") ||
     clientCode.includes('require("@deepseek-ai/dsh-credentials")') ||
-    clientCode.includes('require("@deepseek-ai/schemastery")')
+    clientCode.includes('require("@deepseek-ai/schemastery")') ||
+    clientCode.includes("@deepseek-ai/dsh-client-runtime") ||
+    clientCode.includes("@deepseek-ai/dsh-host-apiproxy")
   ) {
     throw new Error("served client loader or inlined stylesheet is missing");
   }
@@ -196,18 +234,18 @@ try {
     rpcId: "pack-smoke-rpc",
     method: "synthesize",
     payload: { text: "", sessionId: "session-smoke" }
-  });
+  }, cookie);
   const rpcEnvelope = rpc.value as { type?: string; rpcId?: string; result?: { ok?: boolean; error?: { message?: string } } };
   if (!rpc.response.ok || rpcEnvelope.type !== "server-response" || rpcEnvelope.rpcId !== "pack-smoke-rpc" || rpcEnvelope.result?.error?.message !== "invalid-input") {
     throw new Error(`installed host RPC did not activate: ${JSON.stringify(rpc.value)}`);
   }
 
-  const settings = await jsonRequest(runtime.baseUrl, "/api/settings.describe", {
+  const settings = await jsonRequest(runtime.baseUrl, "/api/settings/describe", {
     type: "client-request",
     rpcId: "pack-smoke-settings",
-    method: "settings.describe",
-    payload: { redactSecrets: true }
-  });
+    method: "settings/describe",
+    payload: { args: {} }
+  }, cookie);
   const settingsEnvelope = settings.value as {
     type?: string;
     rpcId?: string;

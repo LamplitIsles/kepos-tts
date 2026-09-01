@@ -1,6 +1,5 @@
 import { credentialRef, type CredentialProvider, type ResolvedCredential } from "@deepseek-ai/dsh-credentials";
-import type { HostConnectionRpc, ConnectionRpcHandler } from "@deepseek-ai/dsh-client-connection";
-import type { RpcResult } from "@deepseek-ai/dsh-host-apiproxy/api";
+import type { HostConnectionRpc, ConnectionRpcHandler, ConnectionRpcResult } from "@deepseek-ai/dsh-client-connection";
 
 import {
   ALIBABA_MODEL,
@@ -106,18 +105,18 @@ function providerDiagnostic(
   return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
 
-function failure<T>(category: TtsFailureCategory): RpcResult<T> {
+function failure<T>(category: TtsFailureCategory): ConnectionRpcResult<T> {
   const code = category === "invalid-input" ? "bad-request" : category === "cancelled" ? "cancelled" : "internal";
   if (code === "bad-request") {
     return {
       ok: false,
       error: { code, message: category, details: { issues: [] } }
-    } as RpcResult<T>;
+    } as ConnectionRpcResult<T>;
   }
   if (code === "cancelled") {
-    return { ok: false, error: { code, message: category, details: {} } } as RpcResult<T>;
+    return { ok: false, error: { code, message: category, details: {} } } as ConnectionRpcResult<T>;
   }
-  return { ok: false, error: { code: "internal", message: category, details: {} } } as RpcResult<T>;
+  return { ok: false, error: { code: "internal", message: category, details: {} } } as ConnectionRpcResult<T>;
 }
 
 /** Leave enough room for JSON framing while bounding any provider response. */
@@ -509,7 +508,7 @@ export class TtsGateway {
     };
   }
 
-  async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<BrowserAudioPayload>> {
+  async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<ConnectionRpcResult<BrowserAudioPayload>> {
     if (endpoint !== RPC_ENDPOINT) return failure("invalid-input");
     try {
       return { ok: true, value: await this.synthesize(payload, signal) };
@@ -538,5 +537,5 @@ export function registerTtsRpc(
   connection: Pick<HostConnectionRpc, "handle">,
   gateway: TtsGateway
 ): () => Promise<void> {
-  return connection.handle(RPC_CHANNEL, createTtsRpcHandler(gateway), { authority: "trusted-host" });
+  return connection.handle(RPC_CHANNEL, createTtsRpcHandler(gateway));
 }

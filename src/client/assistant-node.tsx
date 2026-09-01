@@ -9,10 +9,11 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { DisclosureRow, IconThinkOutline14, JsonBlock, MarkdownText } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { AssistantBlock } from "@deepseek-ai/dsh-client-runtime/client";
-import type { ChatNodeViewProps, RenderMessageImages } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { MarkdownLabels } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { AssistantBlock, RenderMessageImages } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { ChatNodeViewProps } from "@deepseek-ai/dsh-client-ui-chat/client";
 
 import { parseTaggedText, type TaggedTextSegment } from "../parser.js";
 import { TtsAudioPlayer, type TtsRpcClient } from "../player.js";
@@ -20,7 +21,7 @@ import styles from "./tts.module.dshcss";
 
 // The block-family presentation below adapts the MIT-licensed
 // AssistantMarkdown/ReasoningRow presentation from the pinned DSH
-// 0.1.1-rc.2 release (@deepseek-ai/dsh-client-ui-conversation). It keeps
+// 0.1.2-alpha.3 release (@deepseek-ai/dsh-client-ui-chat). It keeps
 // markdown, reasoning, images, unknown blocks, interruption markers, and file
 // mentions intact while changing only finalized prose rendering.
 
@@ -39,7 +40,10 @@ type AssistantProps = ChatNodeViewProps<"assistant-step"> & {
   profileSource?: ProfileSource;
 };
 
-type MarkdownCodeLabels = { copyLabel: string; copiedLabel: string };
+const DEFAULT_MARKDOWN_LABELS: MarkdownLabels = {
+  code: { copyLabel: "Copy", copiedLabel: "Copied" },
+  footnotes: "Footnotes"
+};
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -85,6 +89,33 @@ function useThrottledVisualUpdate(update: () => void, intervalFrames = 3): () =>
     };
     pendingFrameRef.current = requestAnimationFrame(advance);
   }, [intervalFrames]);
+}
+
+/** Keep hidden reasoning searchable and reveal its owning Turn process on demand. */
+function useSearchableHidden(hidden: boolean, reveal: () => void): MutableRefObject<HTMLDivElement | null> {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    if (hidden && element.contains(element.ownerDocument.activeElement)) {
+      reveal();
+      return;
+    }
+    if (hidden) element.setAttribute("hidden", "until-found");
+    else element.removeAttribute("hidden");
+  }, [hidden, reveal]);
+  useEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    element.addEventListener("beforematch", reveal);
+    return () => element.removeEventListener("beforematch", reveal);
+  }, [reveal]);
+  return ref;
+}
+
+function ProcessReasoning({ hidden, reveal, children }: { hidden: boolean; reveal?: (() => void) | undefined; children?: ReactNode }): ReactNode {
+  const ref = useSearchableHidden(hidden, reveal ?? (() => undefined));
+  return createElement("div", { ref, "data-turn-process-inline": hidden || undefined }, children);
 }
 
 interface ReasoningRowProps {
@@ -149,7 +180,7 @@ function normalText(
   key: string | number,
   streaming: boolean,
   mentions: unknown,
-  codeLabels?: MarkdownCodeLabels
+  labels?: MarkdownLabels
 ): ReactNode {
   if (segment.kind === "tts") return null;
   return createElement(MarkdownText, {
@@ -157,7 +188,7 @@ function normalText(
     text: segment.text,
     streaming,
     fileMentions: mentions as never,
-    codeLabels
+    labels: labels ?? DEFAULT_MARKDOWN_LABELS
   });
 }
 
@@ -170,7 +201,9 @@ export interface RenderAssistantBlocksOptions {
   client?: TtsRpcClient | undefined;
   profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
-  codeLabels?: MarkdownCodeLabels | undefined;
+  labels?: MarkdownLabels | undefined;
+  reasoningHidden?: boolean | undefined;
+  revealProcess?: (() => void) | undefined;
 }
 
 /** Render the stock assistant block families, intercepting only final prose. */
@@ -208,7 +241,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
                 `${index}-${segmentIndex}`,
                 options.streaming,
                 options.mentions,
-                options.codeLabels
+                options.labels
               ));
             }
           });
@@ -220,20 +253,24 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
         text: block.text,
         streaming: options.streaming,
         fileMentions: options.mentions as never,
-        codeLabels: options.codeLabels
+        labels: options.labels ?? DEFAULT_MARKDOWN_LABELS
       }));
       continue;
     }
     if (block.kind === "reasoning") {
-      rendered.push(createElement(ReasoningRow, {
+      rendered.push(createElement(ProcessReasoning, {
         key: index,
+        hidden: options.reasoningHidden ?? false,
+        reveal: options.revealProcess
+      }, createElement(ReasoningRow, {
         text: block.text,
         running: options.streaming && index === last,
         t: options.t
-      }));
+      })));
       continue;
     }
     if (block.kind === "image") {
+      const start = index;
       const images = [{ attachment: block.attachment }];
       while (index + 1 < blocks.length && blocks[index + 1]?.kind === "image") {
         index += 1;
@@ -241,7 +278,7 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
         if (image?.kind === "image") images.push({ attachment: image.attachment });
       }
       if (options.renderMessageImages) {
-        rendered.push(createElement(Fragment, { key: `${index}-images` }, options.renderMessageImages({ images, align: "start" })));
+        rendered.push(createElement(Fragment, { key: `${start}-images` }, options.renderMessageImages({ images, align: "start" })));
       }
       continue;
     }
@@ -269,6 +306,8 @@ interface AssistantMarkdownProps {
   client?: TtsRpcClient | undefined;
   profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
+  reasoningHidden?: boolean | undefined;
+  revealProcess?: (() => void) | undefined;
 }
 
 /** Pinned AssistantMarkdown root/body shape with the prose seam added. */
@@ -281,11 +320,16 @@ function AssistantMarkdown({
   t,
   client,
   profileKey,
-  renderMessageImages
+  renderMessageImages,
+  reasoningHidden,
+  revealProcess
 }: AssistantMarkdownProps): ReactNode {
-  const codeLabels = useMemo(() => ({
-    copyLabel: t("copy"),
-    copiedLabel: t("copied")
+  const labels = useMemo<MarkdownLabels>(() => ({
+    code: {
+      copyLabel: t("copy"),
+      copiedLabel: t("copied")
+    },
+    footnotes: t("markdown.footnotes")
   }), [t]);
   if (!(streaming || interrupted || blocks.some((block) => block.kind !== "tool-call"))) return null;
   return createElement(
@@ -302,8 +346,10 @@ function AssistantMarkdown({
         t,
         client,
         profileKey,
-        codeLabels,
-        renderMessageImages
+        labels,
+        renderMessageImages,
+        reasoningHidden,
+        revealProcess
       })
     )
   );
@@ -326,6 +372,12 @@ export function TtsAssistantNodeView(props: AssistantProps) {
     return { turn, seq: finalNode.seq, openFile: props.openFile };
   }, [data.finalNode, props.openFile, tail, turn]);
   const mentions = useMemo(() => owner === undefined ? undefined : props.fileMentions(owner as never), [owner, props.fileMentions]);
+  const reasoningHidden = props.turnProcess !== undefined
+    && props.turnProcess.foldable
+    && props.turnProcess.spec.answerStep === data.step
+    && props.turnProcess.spec.inlineReasoning
+    && !props.turnProcess.open;
+  const revealProcess = useCallback(() => props.turnProcess?.setOpen(true), [props.turnProcess]);
   return createElement(AssistantMarkdown, {
     blocks,
     streaming,
@@ -335,6 +387,8 @@ export function TtsAssistantNodeView(props: AssistantProps) {
     t: props.t as unknown as (key: string, params?: Record<string, unknown>) => string,
     client: props.client,
     profileKey,
-    renderMessageImages: props.renderMessageImages
+    renderMessageImages: props.renderMessageImages,
+    reasoningHidden,
+    revealProcess
   });
 }

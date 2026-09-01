@@ -17,7 +17,9 @@ bun run pack-smoke
 ```
 
 The resulting package contains a host ESM entry, a browser loader entry, and
-`cordis.patch.yml`. It is pinned to the DSH `0.1.1-rc.2` contract family.
+`cordis.patch.yml`. It is pinned to the DSH `0.1.2-alpha.3` contract family.
+The packed smoke test requires a `dsh` CLI reporting that exact version; set
+`DSH_CLI` when it is not the default executable on `PATH`.
 
 ## Settings
 
