@@ -1,5 +1,5 @@
 import { createElement, useEffect, useId, useRef, useState } from "react";
-import type { SettingsScope } from "@deepseek-ai/dsh-client-runtime/client";
+import type { SettingsScope } from "@deepseek-ai/dsh-client-ui-settings/client";
 import { IconChevronDownOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
 
 import {
@@ -28,8 +28,8 @@ export interface CredentialStatus {
 
 export interface CredentialApi {
   credentials: {
-    describe(payload: { refs: string[] }, signal?: AbortSignal): Promise<unknown>;
-    set(payload: { ref: string; value: string }, signal?: AbortSignal): Promise<unknown>;
+    describe(refs: string[]): Promise<unknown>;
+    set(ref: string, value: string): Promise<unknown>;
   };
 }
 
@@ -88,34 +88,22 @@ function defaultVoiceFor(provider: TtsProvider): string {
   return provider === "bytedance" ? DEFAULT_BYTEDANCE_VOICE : DEFAULT_ALIBABA_VOICE;
 }
 
-function responseResult(response: unknown): unknown {
-  if (typeof response === "object" && response !== null && "result" in response) {
-    return (response as { result?: unknown }).result;
-  }
-  return response;
-}
-
 function resultValue(response: unknown): unknown {
-  const result = responseResult(response);
-  if (typeof result === "object" && result !== null && "ok" in result) {
-    const rpc = result as { ok?: unknown; value?: unknown };
-    return rpc.ok === true ? rpc.value : undefined;
+  if (typeof response === "object" && response !== null && "ok" in response) {
+    const remote = response as { ok?: unknown; value?: unknown };
+    return remote.ok === true ? remote.value : undefined;
   }
-  return result;
+  return undefined;
 }
 
 function credentialView(value: unknown, ref: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
-  if (!("credentials" in value)) return value;
-  const credentials = (value as { credentials?: unknown }).credentials;
-  return typeof credentials === "object" && credentials !== null
-    ? (credentials as Record<string, unknown>)[ref]
-    : undefined;
+  return ref in value ? (value as Record<string, unknown>)[ref] : undefined;
 }
 
 export async function describeCredential(api: CredentialApi, ref = ALIBABA_CREDENTIAL_REF): Promise<CredentialStatus> {
   try {
-    const value = credentialView(resultValue(await api.credentials.describe({ refs: [ref] })), ref);
+    const value = credentialView(resultValue(await api.credentials.describe([ref])), ref);
     if (typeof value !== "object" || value === null) return DEFAULT_STATUS;
     const info = value as { configured?: unknown; source?: unknown; writable?: unknown };
     return {
@@ -129,9 +117,8 @@ export async function describeCredential(api: CredentialApi, ref = ALIBABA_CREDE
 }
 
 export async function saveCredential(api: CredentialApi, value: string, ref = ALIBABA_CREDENTIAL_REF): Promise<void> {
-  const response = await api.credentials.set({ ref, value });
-  const result = responseResult(response);
-  if (typeof result === "object" && result !== null && "ok" in result && (result as { ok?: unknown }).ok !== true) {
+  const response = await api.credentials.set(ref, value);
+  if (typeof response === "object" && response !== null && "ok" in response && (response as { ok?: unknown }).ok !== true) {
     throw new Error("credential-rejected");
   }
 }

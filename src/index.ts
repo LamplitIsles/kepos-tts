@@ -1,5 +1,4 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 import {
   DEFAULT_ALIBABA_VOICE,
@@ -29,7 +28,7 @@ type HostContext = Context & {
 
 export function apply(ctx: HostContext): void {
   const settings = ctx.settings.register(
-    settingsNamespace(SETTINGS_NAMESPACE),
+    SETTINGS_NAMESPACE,
     TtsSettingsSchema,
     {
       base: {
