@@ -21,6 +21,7 @@ import {
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
   TtsGateway,
+  createKeposTtsService,
   RPC_ENDPOINT,
   TtsGatewayError,
   audioArtifactPath,
@@ -318,5 +319,45 @@ describe("provider-neutral TTS gateway", () => {
     await serveTtsAudio({ method: "GET", url: payload.url }, res, sessionStore(cwd));
     expect(captured.status).toBe(200);
     expect(captured.body).toEqual(new Uint8Array([0x49, 0x44, 0x33]));
+  });
+
+  it("returns a bounded byte payload through the optional Host service and reuses the cache", async () => {
+    const cwd = await workspace();
+    let calls = 0;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getSettings: () => ({ provider: "alibaba", alibabaVoice: "Maia" }),
+      fetch: async () => {
+        calls += 1;
+        return jsonResponse({ output: { audio: { data: "SUQz" } } });
+      }
+    });
+    const service = createKeposTtsService(gateway);
+    const first = await service.synthesize({ sessionId: "session-a", text: "  服务调用\n" });
+    const second = await service.synthesize({ sessionId: "session-a", text: "服务调用" });
+    expect(first).toEqual({ mediaType: "audio/mpeg", data: new Uint8Array([0x49, 0x44, 0x33]) });
+    expect(second).toEqual(first);
+    expect(Object.keys(first)).toEqual(["mediaType", "data"]);
+    expect(JSON.stringify(first)).not.toContain("kepos-tts/audio");
+    expect(calls).toBe(1);
+  });
+
+  it("keeps Host service validation and cancellation typed", async () => {
+    const cwd = await workspace();
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async () => jsonResponse({ output: { audio: { data: "SUQz" } } })
+    });
+    const service = createKeposTtsService(gateway);
+    await expect(service.synthesize({ sessionId: "missing", text: "你好" })).rejects.toMatchObject({ category: "unavailable" });
+    await expect(service.synthesize({ sessionId: "", text: "你好" })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(service.synthesize({ text: "你好" } as never)).rejects.toMatchObject({ category: "invalid-input" });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(service.synthesize({ sessionId: "session-a", text: "你好" }, controller.signal)).rejects.toMatchObject({ category: "cancelled" });
+    await expect(service.synthesize({ sessionId: "session-a", text: "" })).rejects.toMatchObject({ category: "invalid-input" });
   });
 });

@@ -22,6 +22,13 @@ starts only after a real ready Host profile exists. When a tagged message
 completes, the browser immediately prepares its MP3 and replaces the tag with the browser's native
 audio player. If synthesis fails, the transcript stays visible.
 
+While the plugin is mounted, Host consumers can optionally read
+`ctx.get("keposTts")` and call `synthesize({ sessionId, text }, signal?)` for
+one bounded `{ mediaType: "audio/mpeg", data: Uint8Array }` result. The
+service shares the same validation, provider credentials, and workspace cache
+as browser TTS, and disappears when the plugin is disposed. It never exposes a
+browser URL or cache path and does not add a public synthesis route.
+
 Artifacts live under the session's immutable workspace cwd at
 `.dsh/kepos-tts/audio/<sha256>.mp3`. The digest includes the normalized passage,
 provider, model/resource, Voice ID, and cache format. The Host validates the

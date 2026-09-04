@@ -7,7 +7,15 @@ import {
   TtsSettingsSchema,
   SETTINGS_NAMESPACE,
 } from "./settings.js";
-import { TtsGateway, registerTtsAudioRoute, registerTtsRpc, type SessionResolver } from "./gateway.js";
+import {
+  KEPOS_TTS_SERVICE,
+  TtsGateway,
+  createKeposTtsService,
+  registerTtsAudioRoute,
+  registerTtsRpc,
+  type KeposTtsService,
+  type SessionResolver
+} from "./gateway.js";
 import { registerTtsPrompt } from "./prompt.js";
 
 export const name = "kepos-tts";
@@ -24,6 +32,7 @@ type HostContext = Context & {
   webServer: {
     register: Parameters<typeof registerTtsAudioRoute>[0]["register"];
   };
+  provide: (name: string, value: unknown) => () => void;
 };
 
 export function apply(ctx: HostContext): void {
@@ -46,6 +55,7 @@ export function apply(ctx: HostContext): void {
     onFailure: (failure) => console.error("[kepos-tts] synthesis failed", failure)
   });
   registerTtsRpc(ctx.connection.rpc, gateway);
+  ctx.provide(KEPOS_TTS_SERVICE, createKeposTtsService(gateway) satisfies KeposTtsService);
   ctx.effect(() => registerTtsAudioRoute(ctx.webServer, ctx.sessions), "kepos-tts: audio route");
   registerTtsPrompt(ctx);
 }
@@ -53,10 +63,15 @@ export function apply(ctx: HostContext): void {
 export {
   TtsGateway,
   TtsGatewayError,
+  KEPOS_TTS_SERVICE,
+  createKeposTtsService,
   registerTtsAudioRoute,
   registerTtsRpc,
   RPC_CHANNEL,
-  RPC_ENDPOINT
+  RPC_ENDPOINT,
+  type KeposTtsAudio,
+  type KeposTtsService,
+  type KeposTtsSynthesisRequest
 } from "./gateway.js";
 export * from "./core.js";
 
