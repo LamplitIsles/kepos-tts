@@ -23,9 +23,10 @@ dsh plugin --profile <profile> add @lamplitisles/kepos-speech
 
 The package is pinned to the DSH `0.1.2-rc.1` contract family and contains the
 Host entry, browser loader, and `cordis.patch.yml` bundle patch. The packed
-smoke test requires the official `@deepseek-ai/dsh@0.1.2-rc.1` CLI; set
-`DSH_CLI` to that installed executable when it is not the default `dsh` on
-`PATH`.
+smoke test resolves the official `@deepseek-ai/dsh@0.1.2-rc.1` CLI through
+`npm exec` in test-owned temporary state, so it never selects an ambient
+`dsh`. Set `DSH_CLI` only when intentionally supplying an executable that
+reports exactly `0.1.2-rc.1`.
 
 ## Settings and providers
 
