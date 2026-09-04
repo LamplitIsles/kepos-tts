@@ -121,14 +121,17 @@ For each subsequent release, update `package.json` to the intended version,
 run the local checks, push the committed change with `og push`, and create its
 semantic version tag with `og tag v<version>` (for example, `og tag
 v0.2.0-beta.1`). Tags must be `v<semver>` (for example `v0.1.0` or
-`v0.2.0-beta.1`). Stable tags publish to npm as `latest`; prerelease tags
-publish as `beta`. The verify job performs an immutable install, typecheck,
-tests, build, packed-artifact validation, and the disposable DSH package smoke
-check before uploading the tarball consumed by the publish job. Publishing uses
-npm OIDC provenance in the protected `npm` environment with `id-token: write`;
-no npm token or repository secret is configured or required for automated
-releases. The one-time bootstrap publication uses the maintainer's local npm
-authentication only.
+`v0.2.0-beta.1`). Every purely numeric prerelease segment must be `0` or a
+non-zero number without leading zeroes: `v1.2.3-0` and `v1.2.3-alpha01` are
+valid, while `v1.2.3-01`, `v1.2.3-0.01`, and `v1.2.3-alpha.01` are rejected.
+Build metadata such as `v1.2.3+build.1` is accepted. Stable tags publish to
+npm as `latest`; prerelease tags publish as `beta`. The verify job performs an
+immutable install, typecheck, tests, build, packed-artifact validation, and the
+disposable DSH package smoke check before uploading the tarball consumed by the
+publish job. Publishing uses npm OIDC provenance in the protected `npm`
+environment with `id-token: write`; no npm token or repository secret is
+configured or required for automated releases. The one-time bootstrap
+publication uses the maintainer's local npm authentication only.
 
 ## Development
 

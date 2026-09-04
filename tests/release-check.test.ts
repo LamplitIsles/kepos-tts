@@ -27,19 +27,21 @@ async function fixture(version: string): Promise<string> {
 }
 
 describe("release tag preflight", () => {
-  it("maps stable and prerelease semantic tags to npm channels", () => {
+  it("maps stable and strict prerelease tags to npm channels", () => {
     expect(versionFromTag("v1.2.3")).toBe("1.2.3");
     expect(versionFromTag("v1.2.3-beta.4")).toBe("1.2.3-beta.4");
     expect(versionFromTag("v1.2.3-0")).toBe("1.2.3-0");
-    expect(versionFromTag("v1.2.3-alpha.01")).toBe("1.2.3-alpha.01");
+    expect(versionFromTag("v1.2.3-alpha01")).toBe("1.2.3-alpha01");
     expect(versionFromTag("v1.2.3+build.1")).toBe("1.2.3+build.1");
-    expect(versionFromTag("v1.2.3-alpha.01+build.1")).toBe("1.2.3-alpha.01+build.1");
+    expect(versionFromTag("v1.2.3-alpha01+build.1")).toBe("1.2.3-alpha01+build.1");
     expect(npmDistTag("v1.2.3")).toBe("latest");
     expect(npmDistTag("v1.2.3-beta.4")).toBe("beta");
     expect(npmDistTag("v1.2.3+build.1")).toBe("latest");
     expect(() => versionFromTag("1.2.3")).toThrow();
     expect(() => versionFromTag("v1.2")).toThrow();
     expect(() => versionFromTag("v1.2.3-01")).toThrow();
+    expect(() => versionFromTag("v1.2.3-alpha.01")).toThrow();
+    expect(() => versionFromTag("v1.2.3-0.01")).toThrow();
   });
 
   it("rejects a tag whose version differs from package metadata", async () => {
