@@ -22,7 +22,7 @@ import styles from "./speech.module.dshcss";
 // The block-family presentation below adapts the MIT-licensed
 // AssistantMarkdown/ReasoningRow presentation from the DSH
 // 0.1.2-alpha.3 snapshot (@deepseek-ai/dsh-client-ui-chat); the package
-// contract is 0.1.2-alpha.5. It keeps
+// contract is 0.1.2-rc.1. It keeps
 // markdown, reasoning, images, unknown blocks, interruption markers, and file
 // mentions intact while changing only finalized prose rendering.
 

@@ -21,10 +21,11 @@ Source: <https://github.com/LamplitIsles/kepos-speech>.
 dsh plugin --profile <profile> add @lamplitisles/kepos-speech
 ```
 
-The package is pinned to the DSH `0.1.2-alpha.5` contract family and contains
-the Host entry, browser loader, and `cordis.patch.yml` bundle patch. The packed
-smoke test requires a `dsh` CLI reporting that exact version; set `DSH_CLI` when
-it is not the default executable on `PATH`.
+The package is pinned to the DSH `0.1.2-rc.1` contract family and contains the
+Host entry, browser loader, and `cordis.patch.yml` bundle patch. The packed
+smoke test requires the official `@deepseek-ai/dsh@0.1.2-rc.1` CLI; set
+`DSH_CLI` to that installed executable when it is not the default `dsh` on
+`PATH`.
 
 ## Settings and providers
 
