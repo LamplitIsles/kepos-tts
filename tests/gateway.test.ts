@@ -353,6 +353,8 @@ describe("provider-neutral TTS gateway", () => {
     });
     const service = createKeposTtsService(gateway);
     await expect(service.synthesize({ sessionId: "missing", text: "你好" })).rejects.toMatchObject({ category: "unavailable" });
+    await expect(service.synthesize({ sessionId: "", text: "你好" })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(service.synthesize({ text: "你好" } as never)).rejects.toMatchObject({ category: "invalid-input" });
     const controller = new AbortController();
     controller.abort();
     await expect(service.synthesize({ sessionId: "session-a", text: "你好" }, controller.signal)).rejects.toMatchObject({ category: "cancelled" });

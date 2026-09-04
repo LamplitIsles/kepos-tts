@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { apply, inject, name } from "../src/index.js";
 import { KEPOS_TTS_SERVICE, RPC_CHANNEL, RPC_ENDPOINT } from "../src/gateway.js";
@@ -44,19 +47,42 @@ describe("host plugin composition", () => {
     hostError.mockRestore();
   });
 
-  it("publishes the Host service only for the mounted Cordis lifetime", async () => {
+  it("publishes the Host service for its lifetime while preserving the browser RPC payload", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "kepos-tts-host-service-"));
+    const handleCalls: unknown[][] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ output: { audio: { data: "SUQz" } } }),
+      { headers: { "content-type": "application/json" } }
+    ));
     const ctx = new Context();
-    ctx.provide("connection", { rpc: { handle: () => async () => undefined } });
-    ctx.provide("credentials", { resolve: async () => undefined });
-    ctx.provide("settings", { register: () => ({ get: () => ({}) }) });
+    ctx.provide("connection", { rpc: { handle: (channel: string, handler: unknown) => { handleCalls.push([channel, handler]); return async () => undefined; } } });
+    ctx.provide("credentials", { resolve: async () => ({ value: "secret", source: "test" }) });
+    ctx.provide("settings", { register: () => ({ get: () => ({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }) }) });
     ctx.provide("systemPrompt", { section: () => () => undefined });
-    ctx.provide("sessions", { get: () => undefined });
+    ctx.provide("sessions", { get: (sessionId: string) => sessionId === "session-a" ? { header: { cwd } } : undefined });
     ctx.provide("webServer", { register: () => () => undefined });
 
-    apply(ctx as never);
-    expect(ctx.get(KEPOS_TTS_SERVICE)).toEqual(expect.objectContaining({ synthesize: expect.any(Function) }));
+    try {
+      apply(ctx as never);
+      expect(ctx.get(KEPOS_TTS_SERVICE)).toEqual(expect.objectContaining({ synthesize: expect.any(Function) }));
+      const handler = handleCalls[0]?.[1] as (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>;
+      const browserResult = await handler(RPC_ENDPOINT, { sessionId: "session-a", text: "你好" }, new AbortController().signal);
+      expect(browserResult).toEqual({
+        ok: true,
+        value: {
+          mediaType: "audio/mpeg",
+          url: expect.stringMatching(/^\/kepos-tts\/audio\/[a-f0-9]{64}\.mp3\?sessionId=session-a$/),
+          bytes: 3
+        }
+      });
+      expect(Object.keys((browserResult as { value: Record<string, unknown> }).value)).toEqual(["mediaType", "url", "bytes"]);
 
-    await ctx.fiber.dispose();
-    expect(ctx.get(KEPOS_TTS_SERVICE)).toBeUndefined();
+      await ctx.fiber.dispose();
+      expect(ctx.get(KEPOS_TTS_SERVICE)).toBeUndefined();
+    } finally {
+      fetchSpy.mockRestore();
+      await ctx.fiber.dispose();
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

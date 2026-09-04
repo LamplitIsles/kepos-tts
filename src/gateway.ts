@@ -240,9 +240,7 @@ function base64ToBytes(value: string): Uint8Array | undefined {
   }
 }
 
-interface SynthesisRequest extends KeposTtsSynthesisRequest {}
-
-function requestFromPayload(payload: unknown): SynthesisRequest {
+function requestFromPayload(payload: unknown): KeposTtsSynthesisRequest {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new TtsGatewayError("invalid-input");
   }
@@ -514,7 +512,7 @@ export class TtsGateway {
   }
 
   private async resolveArtifact(payload: unknown, signal?: AbortSignal): Promise<{
-    request: SynthesisRequest;
+    request: KeposTtsSynthesisRequest;
     digest: string;
     path: string;
     size: number;
