@@ -5,34 +5,49 @@ import { join, resolve } from "node:path";
 import vm from "node:vm";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
+const DSH_VERSION = "0.1.2-rc.1";
 if (!existsSync(join(root, "dist", "index.js")) || !existsSync(join(root, "dist", "client.js"))) {
   throw new Error("pack-smoke requires a fresh `bun run build`");
 }
 
-function dshEntry(): string {
+function dshEntry(env: NodeJS.ProcessEnv): string {
   const configured = process.env.DSH_CLI;
-  let cli = configured;
-  if (!cli) {
+  let entry = configured;
+  if (!entry) {
     try {
-      cli = execFileSync("which", ["dsh"], { encoding: "utf8" }).trim();
-    } catch {
-      cli = undefined;
+      const output = execFileSync(
+        "npm",
+        [
+          "exec",
+          "--yes",
+          "--no-audit",
+          "--no-fund",
+          `--package=@deepseek-ai/dsh@${DSH_VERSION}`,
+          "--",
+          "sh",
+          "-c",
+          "command -v dsh"
+        ],
+        { cwd: root, encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }
+      );
+      entry = output.trim().split(/\r?\n/).at(-1);
+    } catch (error) {
+      const detail = error && typeof error === "object" && "stderr" in error ? String((error as { stderr?: unknown }).stderr ?? "").trim() : "";
+      throw new Error(`pack-smoke could not install DSH ${DSH_VERSION} CLI${detail ? `: ${detail}` : ""}`);
     }
   }
-  if (!cli || !existsSync(cli)) {
-    throw new Error("pack-smoke requires the installed `dsh` CLI (set DSH_CLI to its path)");
+  if (!entry || !existsSync(entry)) {
+    throw new Error(`pack-smoke requires dsh ${DSH_VERSION} (set DSH_CLI to an executable path)`);
   }
-  const entry = realpathSync(cli);
+  entry = realpathSync(entry);
   if (!existsSync(entry)) throw new Error(`DSH CLI target does not exist: ${entry}`);
   let version = "";
   try {
-    version = execFileSync(process.execPath, ["--expose-internals", entry, "--version"], { encoding: "utf8" }).trim();
+    version = execFileSync(process.execPath, ["--expose-internals", entry, "--version"], { cwd: root, encoding: "utf8", env }).trim();
   } catch {
-    throw new Error("pack-smoke could not query the installed DSH CLI version");
+    throw new Error(`pack-smoke could not query dsh ${DSH_VERSION} CLI version`);
   }
-  if (version !== "0.1.2-alpha.3") {
-    throw new Error(`pack-smoke requires DSH 0.1.2-alpha.3, found ${version || "unknown"}`);
-  }
+  if (version !== DSH_VERSION) throw new Error(`pack-smoke requires dsh ${DSH_VERSION}, got ${version || "unknown"}`);
   return entry;
 }
 
@@ -145,7 +160,7 @@ try {
   const runtimeCwd = join(temp, "runtime-cwd");
   mkdirSync(runtimeCwd, { recursive: true });
   const env = isolatedEnvironment(temp, home);
-  const entry = dshEntry();
+  const entry = dshEntry(env);
   try {
     execFileSync(process.execPath, ["--expose-internals", entry, "plugin", "--profile", "web", "add", tarball, "--ignore-scripts"], {
       cwd: runtimeCwd,
@@ -171,13 +186,13 @@ try {
     throw new Error("packed manifest is not pinned to Cordis 4.0.2");
   }
   for (const [name, version] of Object.entries(manifest.peerDependencies ?? {})) {
-    if (name.startsWith("@deepseek-ai/dsh-") && version !== "0.1.2-alpha.3") {
-      throw new Error(`packed manifest has a non-alpha DSH peer: ${name}@${version}`);
+    if (name.startsWith("@deepseek-ai/dsh-") && version !== DSH_VERSION) {
+      throw new Error(`packed manifest has a non-rc.1 DSH peer: ${name}@${version}`);
     }
   }
   const injected = manifest.dsh?.client?.inject ?? [];
   for (const required of ["@deepseek-ai/dsh-client-ui-chat", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-session"]) {
-    if (!injected.includes(required)) throw new Error(`packed manifest is missing alpha client service ${required}`);
+    if (!injected.includes(required)) throw new Error(`packed manifest is missing rc.1 client service ${required}`);
   }
   for (const obsolete of ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-host-apiproxy"]) {
     if (injected.includes(obsolete) || Object.hasOwn(manifest.peerDependencies ?? {}, obsolete)) {

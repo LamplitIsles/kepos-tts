@@ -3,7 +3,8 @@
 ## DeepSeek Harness assistant presentation
 
 `src/client/assistant-node.tsx` adapts the `AssistantMarkdown` and
-`ReasoningRow` presentation from DeepSeek Harness 0.1.2-alpha.3:
+`ReasoningRow` presentation from the DeepSeek Harness 0.1.2-alpha.3 snapshot
+(the package contract is pinned to 0.1.2-rc.1):
 <https://github.com/deepseek-ai/deepseek-harness/tree/0.1.2-alpha.3/packages/client/ui-chat>.
 
 Copyright (c) 2026 DeepSeek

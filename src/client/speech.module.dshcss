@@ -96,7 +96,8 @@
 .settingsDiscard:focus-visible,
 .settingsSave:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 
-/* Adapted from DSH 0.1.2-alpha.3 AssistantMarkdown/ReasoningRow presentation. */
+/* Adapted from the DSH 0.1.2-alpha.3 AssistantMarkdown/ReasoningRow snapshot;
+   the package contract is 0.1.2-rc.1. */
 .assistant {
   color: var(--dsw-alias-label-primary);
   flex-direction: column;
