@@ -35,13 +35,8 @@ interface KeposTtsService {
     signal?: AbortSignal
   ): Promise<{
     text: string;
-    sentences: Array<{
-      startMs: number;
-      endMs: number;
-      text: string;
-      language?: string;
-      expression?: string;
-    }>;
+    language?: string;
+    expression?: string;
   }>;
 }
 ```
@@ -56,8 +51,10 @@ provider diagnostic is placed in the service value.
 The same optional service also exposes bounded, synchronous Qwen ASR for
 short non-real-time audio. It resolves the shared DashScope credential on each
 call, uses the fixed `qwen3-asr-flash` model, propagates cancellation, and
-returns provider-neutral text plus ordered sentence timings. Provider-owned
-confidence and raw response fields are not part of the contract.
+returns provider-neutral text plus the model's optional audio-level language
+and speech-expression annotations. The synchronous response has no sentence
+timestamps; provider-owned confidence and raw response fields are not part of
+the contract.
 
 The service is optional and is removed with the plugin lifecycle. Consumers
 must read it with `ctx.get("keposTts")` and handle `undefined`; Kepos does not
@@ -69,6 +66,7 @@ remain unchanged for browser tagged-TTS behavior.
 Host consumers can upload or otherwise process one bounded MP3 without knowing
 about Web transport or cache layout. Host consumers can likewise submit one
 bounded audio clip for Qwen recognition without knowing DashScope request
-details. Deployments without Kepos TTS expose no service, while mounted
-deployments retain one provider and cache owner. This is an in-process Host
-seam, not a public synthesis endpoint or a streaming audio API.
+details. The encoded Data URL is bounded to 10 MB, while DashScope enforces the
+five-minute duration limit. Deployments without Kepos TTS expose no service,
+while mounted deployments retain one provider and cache owner. This is an
+in-process Host seam, not a public synthesis endpoint or a streaming audio API.

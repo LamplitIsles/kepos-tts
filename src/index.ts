@@ -73,8 +73,7 @@ export {
   type KeposTtsService,
   type KeposTtsSynthesisRequest,
   type KeposTtsTranscription,
-  type KeposTtsTranscriptionRequest,
-  type KeposTtsTranscriptionSentence
+  type KeposTtsTranscriptionRequest
 } from "./gateway.js";
 export * from "./core.js";
 

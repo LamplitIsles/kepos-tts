@@ -64,25 +64,26 @@ if (tts) {
     data: attachmentBytes,
     language: "zh" // optional recognition hint
   }, signal);
-  // transcript.text and ordered transcript.sentences are provider-neutral
+  // transcript.text plus optional audio-level language/expression annotations
 }
 ```
 
 The service validates the live session and text, resolves the configured
 provider and credential, and shares the workspace cache with browser TTS. Its
-`transcribe` operation validates a non-empty supported audio attachment no
-larger than 10 MB, resolves the same DashScope key, and calls the fixed
-`qwen3-asr-flash` model synchronously with a private Base64 data URL. DashScope
-enforces the corresponding five-minute duration limit; Kepos does not decode
-arbitrary containers to estimate duration. The result contains complete text
-and ordered sentence records with millisecond timing, detected language when
-provided, and an optional discrete speech-expression label. That label is a
-model classification of speech expression, not a fact about the speaker's
-inner state; callers should combine it with transcript and conversation
-context. The service never persists audio, transcript content, raw provider
-JSON, or credentials. It is optional and disappears with the Kepos plugin
-fiber. This is an in-process Host seam for non-browser consumers, not a public
-transcription route and not a replacement for the authenticated browser RPC.
+`transcribe` operation validates a non-empty supported audio attachment whose
+Base64 Data URL is no larger than 10 MB, resolves the same DashScope key, and
+calls the fixed `qwen3-asr-flash` model synchronously with that private Data
+URL. DashScope enforces the corresponding five-minute duration limit; Kepos
+does not decode arbitrary containers to estimate duration. The documented
+response contains complete text plus optional audio-level detected language
+and a discrete speech-expression label; this synchronous model does not
+provide sentence timestamps. That label is a model classification of speech
+expression, not a fact about the speaker's inner state; callers should combine
+it with transcript and conversation context. The service never persists audio,
+transcript content, raw provider JSON, or credentials. It is optional and
+disappears with the Kepos plugin fiber. This is an in-process Host seam for
+non-browser consumers, not a public transcription route and not a replacement
+for the authenticated browser RPC.
 
 ## Audio cache
 

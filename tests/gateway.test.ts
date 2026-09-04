@@ -12,7 +12,7 @@ import {
   DASHSCOPE_ENDPOINT,
   DEFAULT_ALIBABA_VOICE,
   DEFAULT_BYTEDANCE_VOICE,
-  MAX_ASR_AUDIO_BYTES,
+  MAX_ASR_DATA_URL_BYTES,
   QWEN_ASR_MODEL,
   normalizeSettings,
   profileFromSettings,
@@ -363,7 +363,7 @@ describe("provider-neutral TTS gateway", () => {
     await expect(service.synthesize({ sessionId: "session-a", text: "" })).rejects.toMatchObject({ category: "invalid-input" });
   });
 
-  it("transcribes bounded audio with the fixed Qwen model and normalizes sentence metadata", async () => {
+  it("transcribes bounded audio with the fixed Qwen model and normalizes audio annotations", async () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
     let request: { body: any; headers: Headers; signal: AbortSignal | null | undefined } | undefined;
@@ -378,12 +378,14 @@ describe("provider-neutral TTS gateway", () => {
         expect(String(url)).toBe(DASHSCOPE_ENDPOINT);
         return jsonResponse({
           output: {
-            transcripts: [{
-              text: "第一句。第二句。",
-              sentences: [
-                { sentence_id: 0, begin_time: 120, end_time: 900, text: "第一句。", language: "zh", emotion: "happy", confidence: 0.99 },
-                { sentence_id: 1, begin_time: 1_200, end_time: 2_100, text: "第二句。", language: "zh", emotion: "unknown", confidence: 0.88 }
-              ]
+            choices: [{
+              finish_reason: "stop",
+              message: {
+                annotations: [{ type: "audio_info", language: "zh", emotion: "happy" }],
+                content: [{ text: "识别结果" }],
+                role: "assistant",
+                confidence: 0.99
+              }
             }]
           },
           provider_private_field: "must not escape"
@@ -396,13 +398,7 @@ describe("provider-neutral TTS gateway", () => {
       data: new Uint8Array([0, 1, 2, 255]),
       language: "zh"
     });
-    expect(result).toEqual({
-      text: "第一句。第二句。",
-      sentences: [
-        { startMs: 120, endMs: 900, text: "第一句。", language: "zh", expression: "happy" },
-        { startMs: 1_200, endMs: 2_100, text: "第二句。", language: "zh" }
-      ]
-    });
+    expect(result).toEqual({ text: "识别结果", language: "zh", expression: "happy" });
     expect(request?.headers.get("authorization")).toBe("Bearer asr-secret");
     expect(request?.body).toEqual({
       model: QWEN_ASR_MODEL,
@@ -416,7 +412,7 @@ describe("provider-neutral TTS gateway", () => {
     expect(JSON.stringify(result)).not.toContain("confidence");
   });
 
-  it("accepts the synchronous choices shape and omits unknown expression labels", async () => {
+  it("accepts the documented synchronous choices shape and omits unknown expression labels", async () => {
     const cwd = await workspace();
     const gateway = new TtsGateway({
       sessions: sessionStore(cwd),
@@ -434,7 +430,38 @@ describe("provider-neutral TTS gateway", () => {
       })
     });
     await expect(gateway.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([3]) }))
-      .resolves.toEqual({ text: "无时码文本", sentences: [] });
+      .resolves.toEqual({ text: "无时码文本", language: "en" });
+  });
+
+  it("accepts the exact Base64 Data URL boundary and rejects the next byte before admission", async () => {
+    const cwd = await workspace();
+    const mediaType = "audio/x-wav";
+    const prefixLength = `data:${mediaType};base64,`.length;
+    const exactBytes = Math.floor((MAX_ASR_DATA_URL_BYTES - prefixLength) / 4) * 3;
+    expect(prefixLength + Math.ceil(exactBytes / 3) * 4).toBe(MAX_ASR_DATA_URL_BYTES);
+    const refs: unknown[] = [];
+    let requests = 0;
+    let observedDataUrlLength = 0;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async (ref) => { refs.push(ref); return { value: "secret", source: "test" }; } },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async (_url, init) => {
+        requests += 1;
+        const body = JSON.parse(String(init?.body)) as { input: { messages: Array<{ content: Array<{ audio: string }> }> } };
+        observedDataUrlLength = body.input.messages[0]!.content[0]!.audio.length;
+        return jsonResponse({ output: { choices: [{ message: { content: [{ text: "边界" }] } }] } });
+      }
+    });
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType, data: new Uint8Array(exactBytes) }))
+      .resolves.toEqual({ text: "边界" });
+    expect(refs).toEqual([ALIBABA_CREDENTIAL_REF]);
+    expect(requests).toBe(1);
+    expect(observedDataUrlLength).toBe(MAX_ASR_DATA_URL_BYTES);
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType, data: new Uint8Array(exactBytes + 1) }))
+      .rejects.toMatchObject({ category: "invalid-input" });
+    expect(refs).toHaveLength(1);
+    expect(requests).toBe(1);
   });
 
   it("rejects invalid audio and unavailable sessions before credential or provider admission", async () => {
@@ -449,7 +476,7 @@ describe("provider-neutral TTS gateway", () => {
     });
     const valid = { sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) };
     await expect(gateway.transcribe({ ...valid, mediaType: "text/plain" })).rejects.toMatchObject({ category: "invalid-input" });
-    await expect(gateway.transcribe({ ...valid, data: new Uint8Array(MAX_ASR_AUDIO_BYTES + 1) })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(gateway.transcribe({ ...valid, data: new Uint8Array(MAX_ASR_DATA_URL_BYTES + 1) })).rejects.toMatchObject({ category: "invalid-input" });
     await expect(gateway.transcribe({ ...valid, data: [] })).rejects.toMatchObject({ category: "invalid-input" });
     await expect(gateway.transcribe({ ...valid, language: "xx" })).rejects.toMatchObject({ category: "invalid-input" });
     await expect(gateway.transcribe({ ...valid, sessionId: "missing" })).rejects.toMatchObject({ category: "unavailable" });

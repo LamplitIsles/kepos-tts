@@ -34,18 +34,19 @@ browser URL or cache path and does not add a public synthesis route.
 
 The same service exposes `transcribe({ sessionId, mediaType, data, language? },
 signal?)`. It accepts one supported, non-empty audio `Uint8Array` no larger than
-10 MB and validates the live session before resolving the shared DashScope key.
-It sends a Base64 data URL to the synchronous `qwen3-asr-flash` endpoint and
-propagates cancellation. DashScope enforces the five-minute duration boundary;
-Kepos deliberately does not decode arbitrary containers to estimate it. The
-returned provider-neutral value contains complete text and ordered sentence
-records with start/end milliseconds, detected language when available, and an
-optional discrete speech-expression label. The label is model-derived speech
-expression metadata, not a psychological assessment or fact about the speaker.
-Audio, transcripts, raw provider responses, and credentials are neither stored
-nor included in failures or diagnostics. The service remains a temporary
-TTS-named Host seam pending a future user-approved rename; Matrix and Companion
-adapters are not part of this package.
+whose Base64 Data URL is no larger than 10 MB and validates the live session
+before resolving the shared DashScope key. It sends that private Data URL to
+the synchronous `qwen3-asr-flash` endpoint and propagates cancellation.
+DashScope enforces the five-minute duration boundary; Kepos deliberately does
+not decode arbitrary containers to estimate it. The documented provider-neutral
+value contains complete text plus optional audio-level detected language and a
+discrete speech-expression label; this synchronous model does not provide
+sentence timestamps. The label is model-derived speech-expression metadata,
+not a psychological assessment or fact about the speaker. Audio, transcripts,
+raw provider responses, and credentials are neither stored nor included in
+failures or diagnostics. The service remains a temporary TTS-named Host seam
+pending a future user-approved rename; Matrix and Companion adapters are not
+part of this package.
 
 Artifacts live under the session's immutable workspace cwd at
 `.dsh/kepos-tts/audio/<sha256>.mp3`. The digest includes the normalized passage,

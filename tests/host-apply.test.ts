@@ -55,7 +55,7 @@ describe("host plugin composition", () => {
       const body = JSON.parse(String(init?.body)) as { model?: string };
       return new Response(
         JSON.stringify(body.model === QWEN_ASR_MODEL
-          ? { output: { transcripts: [{ text: "主机识别", sentences: [{ begin_time: 0, end_time: 420, text: "主机识别", language: "zh", emotion: "neutral" }] }] } }
+          ? { output: { choices: [{ message: { content: [{ text: "主机识别" }], annotations: [{ type: "audio_info", language: "zh", emotion: "neutral" }] } }] } }
           : { output: { audio: { data: "SUQz" } } }),
         { headers: { "content-type": "application/json" } }
       );
@@ -84,7 +84,7 @@ describe("host plugin composition", () => {
       expect(Object.keys((browserResult as { value: Record<string, unknown> }).value)).toEqual(["mediaType", "url", "bytes"]);
       const service = ctx.get(KEPOS_TTS_SERVICE)!;
       await expect(service.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1, 2]) }))
-        .resolves.toEqual({ text: "主机识别", sentences: [{ startMs: 0, endMs: 420, text: "主机识别", language: "zh", expression: "neutral" }] });
+        .resolves.toEqual({ text: "主机识别", language: "zh", expression: "neutral" });
 
       await ctx.fiber.dispose();
       expect(ctx.get(KEPOS_TTS_SERVICE)).toBeUndefined();

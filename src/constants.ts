@@ -10,8 +10,8 @@ export const ALIBABA_MODEL = "qwen3-tts-flash";
 /** Fixed DashScope model used by the Host-only short-audio transcription path. */
 export const QWEN_ASR_MODEL = "qwen3-asr-flash";
 
-/** Qwen3-ASR-Flash's synchronous input bound. Duration remains provider-enforced. */
-export const MAX_ASR_AUDIO_BYTES = 10 * 1024 * 1024;
+/** DashScope's Qwen3-ASR-Flash synchronous Base64 Data URL bound. */
+export const MAX_ASR_DATA_URL_BYTES = 10 * 1024 * 1024;
 
 /**
  * Audio media types accepted by Qwen3-ASR-Flash's URL/Base64 input. Video

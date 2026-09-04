@@ -19,10 +19,12 @@ unchanged.
 The optional in-process Cordis service temporarily named `keposTts`. A Host
 plugin calls `synthesize({ sessionId, text }, signal?)` for bounded MP3 bytes,
 or `transcribe({ sessionId, mediaType, data, language? }, signal?)` for a
-short, non-real-time Qwen ASR result. Both operations require a live session;
-the transcription path uses the shared DashScope credential and returns no
-browser URL, filesystem path, public HTTP route, or persisted artifact. The
-service name remains TTS-oriented until a future user-approved rename.
+short, non-real-time Qwen ASR result with audio-level language and expression
+annotations. Both operations require a live session; the transcription path
+uses the shared DashScope credential and returns no browser URL, filesystem
+path, public HTTP route, or persisted artifact. The synchronous model does not
+provide sentence timestamps. The service name remains TTS-oriented until a
+future user-approved rename.
 
 **Live session**:
 A DSH session that resolves to an absolute workspace cwd through the Host
@@ -46,6 +48,6 @@ write-only native settings card regardless of the selected TTS output provider;
 the Volcengine credential remains ByteDance-TTS-only.
 
 **Speech-expression label**:
-An optional discrete label returned by Qwen's model for a sentence. It is
+An optional discrete audio-level label returned by Qwen's model. It is
 model-derived speech-expression metadata, not a factual claim about a speaker's
 inner state, diagnosis, or decision signal.

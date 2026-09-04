@@ -7,7 +7,7 @@ import {
   BYTEDANCE_ENDPOINT,
   BYTEDANCE_RESOURCE_ID,
   DASHSCOPE_ENDPOINT,
-  MAX_ASR_AUDIO_BYTES,
+  MAX_ASR_DATA_URL_BYTES,
   QWEN_ASR_EXPRESSIONS,
   QWEN_ASR_LANGUAGES,
   QWEN_ASR_MEDIA_TYPES,
@@ -82,20 +82,13 @@ export interface KeposTtsTranscriptionRequest {
   language?: QwenAsrLanguage;
 }
 
-/** One provider-neutral, sentence-level recognition record. */
-export interface KeposTtsTranscriptionSentence {
-  startMs: number;
-  endMs: number;
-  text: string;
-  language?: QwenAsrLanguage;
-  /** A model classification of speech expression, not a fact about the speaker. */
-  expression?: QwenAsrExpression;
-}
-
 /** Provider-neutral Qwen ASR result returned to a trusted Host caller. */
 export interface KeposTtsTranscription {
   text: string;
-  sentences: KeposTtsTranscriptionSentence[];
+  /** Audio-level language annotation from the model, when present. */
+  language?: QwenAsrLanguage;
+  /** Audio-level model classification, not a fact about the speaker's inner state. */
+  expression?: QwenAsrExpression;
 }
 
 /** Optional in-process Host capability offered while the Kepos plugin is mounted. */
@@ -157,6 +150,18 @@ export class TtsGatewayError extends Error {
     this.category = category;
     this.diagnostic = diagnostic;
   }
+}
+
+function reportGatewayFailure(error: unknown, onFailure?: (failure: TtsFailureDiagnostic) => void): TtsGatewayError {
+  const typed = error instanceof TtsGatewayError ? error : new TtsGatewayError("internal");
+  if (typed.category !== "invalid-input" && typed.category !== "cancelled") {
+    try {
+      onFailure?.({ category: typed.category, ...typed.diagnostic });
+    } catch {
+      // Observability must not change the operation result.
+    }
+  }
+  return typed;
 }
 
 function providerDiagnostic(
@@ -293,6 +298,10 @@ function bytesToBase64(bytes: Uint8Array): string {
   return encoded;
 }
 
+function dataUrlLength(mediaType: string, byteLength: number): number {
+  return `data:${mediaType};base64,`.length + Math.ceil(byteLength / 3) * 4;
+}
+
 interface ParsedTranscriptionRequest {
   sessionId: string;
   mediaType: string;
@@ -318,7 +327,7 @@ function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionR
   if (typeof record.sessionId !== "string" || !record.sessionId.trim()) {
     throw new TtsGatewayError("invalid-input");
   }
-  if (!(record.data instanceof Uint8Array) || record.data.byteLength === 0 || record.data.byteLength > MAX_ASR_AUDIO_BYTES) {
+  if (!(record.data instanceof Uint8Array) || record.data.byteLength === 0) {
     throw new TtsGatewayError("invalid-input");
   }
 
@@ -333,6 +342,9 @@ function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionR
     || !/^audio\/[a-z0-9][a-z0-9.+-]*$/u.test(baseMediaType)
     || !/^audio\/[a-z0-9][a-z0-9.+-]*(?:\s*;\s*[a-z0-9!#$&^_.+-]+=[a-z0-9!#$&^_.+-]+)*$/u.test(mediaType)
   ) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  if (dataUrlLength(mediaType, record.data.byteLength) > MAX_ASR_DATA_URL_BYTES) {
     throw new TtsGatewayError("invalid-input");
   }
 
@@ -373,98 +385,25 @@ function expressionValue(value: unknown): QwenAsrExpression | undefined {
 }
 
 function textFromContent(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length === 0) return undefined;
   const parts: string[] = [];
   for (const item of value) {
-    if (typeof item === "string") {
-      parts.push(item);
-      continue;
-    }
     if (!isRecord(item) || typeof item.text !== "string") return undefined;
     parts.push(item.text);
   }
   return parts.join("");
 }
 
-function annotationDefaults(value: unknown): { language?: QwenAsrLanguage; expression?: QwenAsrExpression } {
+function syncAnnotations(value: unknown): { language?: QwenAsrLanguage; expression?: QwenAsrExpression } {
   if (!Array.isArray(value)) return {};
   let language: QwenAsrLanguage | undefined;
   let expression: QwenAsrExpression | undefined;
   for (const annotation of value) {
     if (!isRecord(annotation)) continue;
     language ??= languageValue(annotation.language);
-    expression ??= expressionValue(annotation.emotion)
-      ?? expressionValue(annotation.expression)
-      ?? expressionValue(annotation.speech_expression);
+    expression ??= expressionValue(annotation.emotion);
   }
   return {
-    ...(language === undefined ? {} : { language }),
-    ...(expression === undefined ? {} : { expression })
-  };
-}
-
-function sentenceSource(output: Record<string, unknown>, message?: Record<string, unknown>): unknown[] | undefined {
-  const nested = isRecord(output.output) ? output.output : undefined;
-  const result = isRecord(output.result) ? output.result : undefined;
-  const nestedResult = isRecord(nested?.result) ? nested.result : undefined;
-  for (const candidate of [output.transcripts, nested?.transcripts, result?.transcripts, nestedResult?.transcripts]) {
-    const first = Array.isArray(candidate) ? candidate[0] : undefined;
-    if (isRecord(first) && Array.isArray(first.sentences)) return first.sentences;
-  }
-  for (const candidate of [output.sentences, nested?.sentences, result?.sentences, nestedResult?.sentences]) {
-    if (Array.isArray(candidate)) return candidate;
-  }
-  for (const candidate of [output.sentence, nested?.sentence, result?.sentence, nestedResult?.sentence]) {
-    if (Array.isArray(candidate)) return candidate;
-    if (isRecord(candidate)) return [candidate];
-  }
-  const content = message?.content;
-  if (Array.isArray(content) && content.some((item) => isRecord(item) && ("begin_time" in item || "end_time" in item))) return content;
-  return undefined;
-}
-
-function integerField(value: unknown, ...names: string[]): number | undefined {
-  if (!isRecord(value)) return undefined;
-  for (const name of names) {
-    const candidate = value[name];
-    if (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0) return candidate;
-  }
-  return undefined;
-}
-
-function sentenceFromProvider(
-  value: unknown,
-  defaults: { language?: QwenAsrLanguage; expression?: QwenAsrExpression }
-): KeposTtsTranscriptionSentence {
-  if (!isRecord(value)) throw new Error("invalid-sentence");
-  const text = typeof value.text === "string" ? value.text : typeof value.content === "string" ? value.content : undefined;
-  if (text === undefined) throw new Error("invalid-sentence");
-
-  let startMs = integerField(value, "begin_time", "startMs", "start_ms", "start_time");
-  let endMs = integerField(value, "end_time", "endMs", "end_ms", "finish_time");
-  if (startMs === undefined || endMs === undefined) {
-    const words = value.words;
-    if (Array.isArray(words) && words.length > 0) {
-      const starts = words.map((word) => integerField(word, "begin_time", "startMs", "start_ms", "start_time"));
-      const ends = words.map((word) => integerField(word, "end_time", "endMs", "end_ms", "finish_time"));
-      if (starts.every((item) => item !== undefined) && ends.every((item) => item !== undefined)) {
-        startMs = Math.min(...starts as number[]);
-        endMs = Math.max(...ends as number[]);
-      }
-    }
-  }
-  if (startMs === undefined || endMs === undefined || endMs < startMs) throw new Error("invalid-sentence");
-  const language = languageValue(value.language) ?? defaults.language;
-  const expression = expressionValue(value.emotion)
-    ?? expressionValue(value.expression)
-    ?? expressionValue(value.speech_expression)
-    ?? expressionValue(value.speechExpression)
-    ?? defaults.expression;
-  return {
-    startMs,
-    endMs,
-    text,
     ...(language === undefined ? {} : { language }),
     ...(expression === undefined ? {} : { expression })
   };
@@ -474,42 +413,17 @@ function sentenceFromProvider(
 export function normalizeQwenAsrResponse(body: unknown): KeposTtsTranscription {
   if (!isRecord(body)) throw new Error("invalid-transcription");
   const output = isRecord(body.output) ? body.output : undefined;
-  if (!output) throw new Error("invalid-transcription");
-  const nested = isRecord(output.output) ? output.output : undefined;
-  const result = isRecord(output.result) ? output.result : undefined;
-  const choices = Array.isArray(output.choices) ? output.choices : undefined;
+  const choices = output && Array.isArray(output.choices) ? output.choices : undefined;
   const choice = choices?.[0];
   const message = isRecord(choice) && isRecord(choice.message) ? choice.message : undefined;
-  const annotations = annotationDefaults(message?.annotations);
-
-  const textCandidates: unknown[] = [
-    output.text,
-    nested?.text,
-    body.text,
-    Array.isArray(output.transcripts) && isRecord(output.transcripts[0]) ? output.transcripts[0].text : undefined,
-    Array.isArray(result?.transcripts) && isRecord(result.transcripts[0]) ? result.transcripts[0].text : undefined,
-    result?.text,
-    message?.content,
-    nested?.sentence && isRecord(nested.sentence) ? nested.sentence.text : undefined,
-    result?.sentence && isRecord(result.sentence) ? result.sentence.text : undefined
-  ];
-  let text: string | undefined;
-  for (const candidate of textCandidates) {
-    const value = textFromContent(candidate);
-    if (value !== undefined) {
-      text = value;
-      break;
-    }
-  }
-
-  const source = sentenceSource(output, message);
-  let sentences: KeposTtsTranscriptionSentence[] = [];
-  if (source !== undefined) {
-    sentences = source.map((item) => sentenceFromProvider(item, annotations));
-  }
-  if (text === undefined && sentences.length > 0) text = sentences.map((sentence) => sentence.text).join("");
+  const text = message ? textFromContent(message.content) : undefined;
   if (text === undefined) throw new Error("invalid-transcription");
-  return { text, sentences };
+  const annotations = syncAnnotations(message?.annotations);
+  return {
+    text,
+    ...(annotations.language === undefined ? {} : { language: annotations.language }),
+    ...(annotations.expression === undefined ? {} : { expression: annotations.expression })
+  };
 }
 
 function requestFromPayload(payload: unknown): KeposTtsSynthesisRequest {
@@ -760,6 +674,7 @@ async function qwenAsrTranscription(
   if (signal?.aborted) throw new TtsGatewayError("cancelled");
   const encoded = bytesToBase64(request.data);
   const dataUrl = `data:${request.mediaType};base64,${encoded}`;
+  if (dataUrl.length > MAX_ASR_DATA_URL_BYTES) throw new TtsGatewayError("invalid-input");
   const asrOptions = {
     enable_itn: true,
     ...(request.language === undefined ? {} : { language: request.language })
@@ -932,17 +847,7 @@ export class TtsGateway {
       if (!credential?.value) throw new TtsGatewayError("unavailable", asrDiagnostic("credential"));
       return await qwenAsrTranscription(this.fetchImpl, credential, request, signal);
     } catch (error) {
-      const typed = error instanceof TtsGatewayError
-        ? error
-        : new TtsGatewayError("internal");
-      if (typed.category !== "invalid-input" && typed.category !== "cancelled") {
-        try {
-          this.options.onFailure?.({ category: typed.category, ...typed.diagnostic });
-        } catch {
-          // Observability must not change the Host service result.
-        }
-      }
-      throw typed;
+      throw reportGatewayFailure(error, this.options.onFailure);
     }
   }
 
@@ -951,18 +856,7 @@ export class TtsGateway {
     try {
       return { ok: true, value: await this.synthesize(payload, signal) };
     } catch (error) {
-      const category = error instanceof TtsGatewayError ? error.category : "internal";
-      if (category !== "invalid-input" && category !== "cancelled") {
-        try {
-          this.options.onFailure?.({
-            category,
-            ...(error instanceof TtsGatewayError ? error.diagnostic : {})
-          });
-        } catch {
-          // Observability must not change the RPC result.
-        }
-      }
-      return failure(category);
+      return failure(reportGatewayFailure(error, this.options.onFailure).category);
     }
   }
 }
