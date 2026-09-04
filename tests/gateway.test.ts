@@ -22,13 +22,13 @@ import {
   AUDIO_ROUTE_PATH,
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
-  TtsGateway,
-  createKeposTtsService,
+  SpeechGateway,
+  createKeposSpeechService,
   RPC_ENDPOINT,
-  TtsGatewayError,
+  SpeechGatewayError,
   audioArtifactPath,
   cacheDigest,
-  serveTtsAudio,
+  serveSpeechAudio,
   type BrowserAudioPayload
 } from "../src/gateway.js";
 
@@ -58,14 +58,14 @@ afterEach(async () => {
 });
 
 async function workspace(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepos-tts-gateway-"));
+  const directory = await mkdtemp(join(tmpdir(), "kepos-speech-gateway-"));
   temporaryDirectories.push(directory);
   return directory;
 }
 
 const credential = (ref: unknown) => ({ value: ref === ALIBABA_CREDENTIAL_REF || ref === BYTEDANCE_CREDENTIAL_REF ? "secret" : "wrong", source: "test" });
 
-describe("provider-neutral TTS gateway", () => {
+describe("provider-neutral Speech gateway", () => {
   it("normalizes independent defaults and keeps the profile key secret-free", () => {
     expect(normalizeSettings(undefined)).toEqual({ provider: "alibaba", alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     expect(normalizeSettings({ provider: "bytedance", alibabaVoice: "  custom  ", bytedanceVoice: "  voice  " })).toEqual({ provider: "bytedance", alibabaVoice: "custom", bytedanceVoice: "voice" });
@@ -79,7 +79,7 @@ describe("provider-neutral TTS gateway", () => {
   it("sends Alibaba's configured Voice ID directly and caches normalized text", async () => {
     const cwd = await workspace();
     const requests: Array<{ body: any; authorization: string }> = [];
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => credential(ref) },
       getSettings: () => ({ provider: "alibaba", alibabaVoice: "  my-custom-id  " }),
@@ -100,7 +100,7 @@ describe("provider-neutral TTS gateway", () => {
   it("posts ByteDance seed TTS with API-key authentication and fixed audio parameters", async () => {
     const cwd = await workspace();
     let request: { url: string; body: any; headers: Headers } | undefined;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => credential(ref) },
       getSettings: () => ({ provider: "bytedance", bytedanceVoice: "  zh_custom  " }),
@@ -117,12 +117,12 @@ describe("provider-neutral TTS gateway", () => {
     expect(request?.headers.get("x-api-key")).toBe("secret");
     expect(request?.headers.get("x-api-resource-id")).toBe(BYTEDANCE_RESOURCE_ID);
     expect(request?.headers.get("x-api-app-key")).toBeNull();
-    expect(request?.body).toEqual({ user: { uid: "kepos-tts" }, req_params: { text: "你好", speaker: "zh_custom", audio_params: { format: "mp3", sample_rate: 24000 } } });
+    expect(request?.body).toEqual({ user: { uid: "kepos-speech" }, req_params: { text: "你好", speaker: "zh_custom", audio_params: { format: "mp3", sample_rate: 24000 } } });
   });
 
   it("concatenates SSE audio frames and accepts a completion frame", async () => {
     const cwd = await workspace();
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd, "s"),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance" }),
@@ -138,7 +138,7 @@ describe("provider-neutral TTS gateway", () => {
 
   it("accepts ByteDance SSE metadata frames with null audio data", async () => {
     const cwd = await workspace();
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance" }),
@@ -155,15 +155,15 @@ describe("provider-neutral TTS gateway", () => {
   it("classifies malformed, rejected, empty, and oversized provider results without exposing content", async () => {
     const cwd = await workspace();
     const base = { sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "bytedance" }) };
-    const rejected = new TtsGateway({ ...base, fetch: async () => jsonResponse({ message: "do not expose" }, 403) });
+    const rejected = new SpeechGateway({ ...base, fetch: async () => jsonResponse({ message: "do not expose" }, 403) });
     await expect(rejected.handle(RPC_ENDPOINT, { sessionId: "session-a", text: "你好" }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { message: "provider-rejected" } });
-    const malformed = new TtsGateway({ ...base, fetch: async () => sseResponse({ code: 0, data: "not base64!" }) });
+    const malformed = new SpeechGateway({ ...base, fetch: async () => sseResponse({ code: 0, data: "not base64!" }) });
     await expect(malformed.synthesize({ sessionId: "session-a", text: "坏" })).rejects.toMatchObject({ category: "provider-invalid-audio" });
-    const business = new TtsGateway({ ...base, fetch: async () => sseResponse({ code: 3001, message: "private provider detail" }) });
+    const business = new SpeechGateway({ ...base, fetch: async () => sseResponse({ code: 3001, message: "private provider detail" }) });
     await expect(business.synthesize({ sessionId: "session-a", text: "拒绝" })).rejects.toMatchObject({ category: "provider-rejected" });
-    const empty = new TtsGateway({ ...base, fetch: async () => sseResponse({ code: 20000000 }) });
+    const empty = new SpeechGateway({ ...base, fetch: async () => sseResponse({ code: 20000000 }) });
     await expect(empty.synthesize({ sessionId: "session-a", text: "空" })).rejects.toMatchObject({ category: "provider-invalid-audio" });
-    const oversized = new TtsGateway({ ...base, fetch: async () => sseResponse({ code: 0, data: Buffer.alloc(MAX_AUDIO_BYTES + 1).toString("base64") }) });
+    const oversized = new SpeechGateway({ ...base, fetch: async () => sseResponse({ code: 0, data: Buffer.alloc(MAX_AUDIO_BYTES + 1).toString("base64") }) });
     await expect(oversized.synthesize({ sessionId: "session-a", text: "太大" })).rejects.toMatchObject({ category: "provider-invalid-audio" });
     expect(JSON.stringify(await rejected.handle(RPC_ENDPOINT, { sessionId: "session-a", text: "你好" }, new AbortController().signal))).not.toContain("do not expose");
   });
@@ -171,7 +171,7 @@ describe("provider-neutral TTS gateway", () => {
   it("reports safe ByteDance response and HTTP diagnostics without request text or credentials", async () => {
     const cwd = await workspace();
     const failures: unknown[] = [];
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance", bytedanceVoice: "voice-a" }),
@@ -185,7 +185,7 @@ describe("provider-neutral TTS gateway", () => {
       new AbortController().signal
     )).resolves.toMatchObject({ ok: false, error: { message: "provider-rejected" } });
 
-    const httpFailure = new TtsGateway({
+    const httpFailure = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance", bytedanceVoice: "voice-a" }),
@@ -224,7 +224,7 @@ describe("provider-neutral TTS gateway", () => {
   it("reports only a fixed issue category when a ByteDance body cannot be framed", async () => {
     const cwd = await workspace();
     const failures: unknown[] = [];
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance" }),
@@ -248,7 +248,7 @@ describe("provider-neutral TTS gateway", () => {
   it("reports only a fixed issue category for an invalid SSE frame", async () => {
     const cwd = await workspace();
     const failures: unknown[] = [];
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
       getSettings: () => ({ provider: "bytedance" }),
@@ -270,7 +270,7 @@ describe("provider-neutral TTS gateway", () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
     let fetchCalls = 0;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => { refs.push(ref); return undefined; } },
       getSettings: () => ({ provider: "bytedance" }),
@@ -287,9 +287,9 @@ describe("provider-neutral TTS gateway", () => {
     expect(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "bytedance", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }));
     expect(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Maia" })).not.toBe(cacheDigest("同句", { provider: "alibaba", alibabaVoice: "Other" }));
     let calls = 0;
-    const first = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; return jsonResponse({ output: { audio: { data: "SUQz" } } }); } });
+    const first = new SpeechGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; return jsonResponse({ output: { audio: { data: "SUQz" } } }); } });
     const expected = await first.synthesize({ sessionId: "session-a", text: "缓存" });
-    const second = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; throw new Error("cache miss"); } });
+    const second = new SpeechGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => { calls += 1; throw new Error("cache miss"); } });
     await expect(second.synthesize({ sessionId: "session-a", text: "缓存" })).resolves.toEqual(expected);
     expect(calls).toBe(1);
     await expect(readFile(audioArtifactPath(cwd, cacheDigest("缓存", { provider: "alibaba" })))).resolves.toEqual(Buffer.from([0x49, 0x44, 0x33]));
@@ -301,7 +301,7 @@ describe("provider-neutral TTS gateway", () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     let provider: "alibaba" | "bytedance" = "alibaba";
-    const gateway = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider }), fetch: async () => { calls += 1; await held; return provider === "bytedance" ? sseResponse({ code: 0, data: "SUQz" }) : jsonResponse({ output: { audio: { data: "SUQz" } } }); } });
+    const gateway = new SpeechGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider }), fetch: async () => { calls += 1; await held; return provider === "bytedance" ? sseResponse({ code: 0, data: "SUQz" }) : jsonResponse({ output: { audio: { data: "SUQz" } } }); } });
     const one = gateway.synthesize({ sessionId: "session-a", text: "并发" });
     const two = gateway.synthesize({ sessionId: "session-a", text: "并发" });
     await vi.waitFor(() => expect(calls).toBe(1));
@@ -314,11 +314,11 @@ describe("provider-neutral TTS gateway", () => {
 
   it("serves only a resolved workspace digest", async () => {
     const cwd = await workspace();
-    const gateway = new TtsGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => jsonResponse({ output: { audio: { data: "SUQz" } } }) });
+    const gateway = new SpeechGateway({ sessions: sessionStore(cwd), credentials: { resolve: async () => ({ value: "secret", source: "test" }) }, getSettings: () => ({ provider: "alibaba" }), fetch: async () => jsonResponse({ output: { audio: { data: "SUQz" } } }) });
     const payload: BrowserAudioPayload = await gateway.synthesize({ sessionId: "session-a", text: "路由" });
     const captured: { status?: number; headers?: Record<string, string> | undefined; body?: unknown } = {};
     const res = { writeHead(status: number, headers?: Record<string, string>) { captured.status = status; captured.headers = headers; }, end(body?: unknown) { captured.body = body; } };
-    await serveTtsAudio({ method: "GET", url: payload.url }, res, sessionStore(cwd));
+    await serveSpeechAudio({ method: "GET", url: payload.url }, res, sessionStore(cwd));
     expect(captured.status).toBe(200);
     expect(captured.body).toEqual(new Uint8Array([0x49, 0x44, 0x33]));
   });
@@ -326,7 +326,7 @@ describe("provider-neutral TTS gateway", () => {
   it("returns a bounded byte payload through the optional Host service and reuses the cache", async () => {
     const cwd = await workspace();
     let calls = 0;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "alibaba", alibabaVoice: "Maia" }),
@@ -335,25 +335,25 @@ describe("provider-neutral TTS gateway", () => {
         return jsonResponse({ output: { audio: { data: "SUQz" } } });
       }
     });
-    const service = createKeposTtsService(gateway);
+    const service = createKeposSpeechService(gateway);
     const first = await service.synthesize({ sessionId: "session-a", text: "  服务调用\n" });
     const second = await service.synthesize({ sessionId: "session-a", text: "服务调用" });
     expect(first).toEqual({ mediaType: "audio/mpeg", data: new Uint8Array([0x49, 0x44, 0x33]) });
     expect(second).toEqual(first);
     expect(Object.keys(first)).toEqual(["mediaType", "data"]);
-    expect(JSON.stringify(first)).not.toContain("kepos-tts/audio");
+    expect(JSON.stringify(first)).not.toContain("kepos-speech/audio");
     expect(calls).toBe(1);
   });
 
   it("keeps Host service validation and cancellation typed", async () => {
     const cwd = await workspace();
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "alibaba" }),
       fetch: async () => jsonResponse({ output: { audio: { data: "SUQz" } } })
     });
-    const service = createKeposTtsService(gateway);
+    const service = createKeposSpeechService(gateway);
     await expect(service.synthesize({ sessionId: "missing", text: "你好" })).rejects.toMatchObject({ category: "unavailable" });
     await expect(service.synthesize({ sessionId: "", text: "你好" })).rejects.toMatchObject({ category: "invalid-input" });
     await expect(service.synthesize({ text: "你好" } as never)).rejects.toMatchObject({ category: "invalid-input" });
@@ -367,7 +367,7 @@ describe("provider-neutral TTS gateway", () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
     let request: { body: any; headers: Headers; signal: AbortSignal | null | undefined } | undefined;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => { refs.push(ref); return { value: "asr-secret", source: "test" }; } },
       // ByteDance remains the selected TTS output, but ASR must still use the
@@ -414,7 +414,7 @@ describe("provider-neutral TTS gateway", () => {
 
   it("accepts the documented synchronous choices shape and omits unknown expression labels", async () => {
     const cwd = await workspace();
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "alibaba" }),
@@ -442,7 +442,7 @@ describe("provider-neutral TTS gateway", () => {
     const refs: unknown[] = [];
     let requests = 0;
     let observedDataUrlLength = 0;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => { refs.push(ref); return { value: "secret", source: "test" }; } },
       getSettings: () => ({ provider: "alibaba" }),
@@ -468,7 +468,7 @@ describe("provider-neutral TTS gateway", () => {
     const cwd = await workspace();
     let credentials = 0;
     let requests = 0;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => { credentials += 1; return { value: "secret", source: "test" }; } },
       getSettings: () => ({ provider: "alibaba" }),
@@ -488,7 +488,7 @@ describe("provider-neutral TTS gateway", () => {
     const cwd = await workspace();
     const refs: unknown[] = [];
     let requests = 0;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async (ref) => { refs.push(ref); return undefined; } },
       getSettings: () => ({ provider: "bytedance" }),
@@ -509,10 +509,10 @@ describe("provider-neutral TTS gateway", () => {
       getSettings: () => ({ provider: "alibaba" as const }),
       onFailure: (failure: unknown) => failures.push(failure)
     };
-    const malformed = new TtsGateway({ ...base, fetch: async () => jsonResponse({ output: { text: 42, details: "private transcript" } }) });
+    const malformed = new SpeechGateway({ ...base, fetch: async () => jsonResponse({ output: { text: 42, details: "private transcript" } }) });
     await expect(malformed.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) }))
       .rejects.toMatchObject({ category: "provider-invalid-transcription" });
-    const rejected = new TtsGateway({
+    const rejected = new SpeechGateway({
       ...base,
       fetch: async () => jsonResponse({ error: "provider-secret rejected private transcript" }, 429)
     });
@@ -526,7 +526,7 @@ describe("provider-neutral TTS gateway", () => {
     const cwd = await workspace();
     const controller = new AbortController();
     let observedSignal: AbortSignal | null | undefined;
-    const gateway = new TtsGateway({
+    const gateway = new SpeechGateway({
       sessions: sessionStore(cwd),
       credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
       getSettings: () => ({ provider: "alibaba" }),

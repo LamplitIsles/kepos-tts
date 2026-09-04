@@ -3,16 +3,16 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { profileFromSettings, type TtsProfile } from "./constants.js";
-import { normalizeTtsText } from "./parser.js";
+import { profileFromSettings, type SpeechProfile } from "./constants.js";
+import { normalizeSpeechText } from "./parser.js";
 
 /** Maximum provider payload accepted and maximum cached artifact served. */
 export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 /** Bump when the on-disk key or artifact contract changes. */
 export const CACHE_FORMAT_VERSION = 2;
-export const TTS_CACHE_DIRECTORY = ".dsh/kepos-tts/audio";
-export const AUDIO_ROUTE_PATH = "/kepos-tts/audio";
+export const SPEECH_CACHE_DIRECTORY = ".dsh/kepos-speech/audio";
+export const AUDIO_ROUTE_PATH = "/kepos-speech/audio";
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -37,7 +37,7 @@ export function resolveSessionWorkspace(sessions: SessionResolver, sessionId: st
 
 /** Return the fixed cache directory below one validated workspace. */
 export function audioCacheDirectory(workspaceCwd: string): string {
-  return join(workspaceCwd, TTS_CACHE_DIRECTORY);
+  return join(workspaceCwd, SPEECH_CACHE_DIRECTORY);
 }
 
 /** Return the artifact path for a digest, rejecting path-like names. */
@@ -56,8 +56,8 @@ export function cacheDigest(
   settings: unknown,
   formatVersion = CACHE_FORMAT_VERSION
 ): string {
-  const profile: TtsProfile = profileFromSettings(settings);
-  const normalized = normalizeTtsText(text);
+  const profile: SpeechProfile = profileFromSettings(settings);
+  const normalized = normalizeSpeechText(text);
   return createHash("sha256")
     .update(JSON.stringify([
       formatVersion,
@@ -140,7 +140,7 @@ function digestFromPath(pathname: string): string | undefined {
  * Serve one digest-named artifact. The workspace is looked up again for every
  * request, so a URL cannot select an arbitrary filesystem directory.
  */
-export async function serveTtsAudio(
+export async function serveSpeechAudio(
   req: Pick<IncomingMessage, "url" | "method">,
   res: AudioResponse,
   sessions: SessionResolver,
@@ -202,7 +202,7 @@ export interface AudioRouteRegistrar {
 }
 
 /** Register the plugin-owned same-origin cache route. */
-export function registerTtsAudioRoute(
+export function registerSpeechAudioRoute(
   webServer: AudioRouteRegistrar,
   sessions: SessionResolver,
   maxBytes = MAX_AUDIO_BYTES
@@ -210,6 +210,6 @@ export function registerTtsAudioRoute(
   return webServer.register({
     kind: "prefix",
     path: AUDIO_ROUTE_PATH,
-    handler: (req, res) => serveTtsAudio(req, res, sessions, maxBytes)
+    handler: (req, res) => serveSpeechAudio(req, res, sessions, maxBytes)
   });
 }

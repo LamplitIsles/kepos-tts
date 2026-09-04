@@ -1,4 +1,4 @@
 - insert:
-    - id: kepos-tts
-      name: "@lamplitisles/kepos-tts"
+    - id: kepos-speech
+      name: "@lamplitisles/kepos-speech"
       inject: [connection, credentials, settings, systemPrompt, sessions, webServer]

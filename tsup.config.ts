@@ -31,13 +31,13 @@ const dshExternals = [
 
 function cssModulesPlugin(): EsbuildPlugin {
   return {
-    name: "kepos-tts-css-modules",
+    name: "kepos-speech-css-modules",
     setup(build) {
       // tsup consumes `.css` as a global stylesheet before esbuild plugins run.
       // This extension routes the source through Lightning CSS's real module transform.
       build.onLoad({ filter: /\.module\.dshcss$/ }, async (args) => {
         const { css, classes } = await compileCssModule(args.path);
-        const styleId = "@lamplitisles/kepos-tts/tts.module.css";
+        const styleId = "@lamplitisles/kepos-speech/speech.module.css";
         return {
           loader: "js",
           contents: [
@@ -45,7 +45,7 @@ function cssModulesPlugin(): EsbuildPlugin {
             `const styleId = ${JSON.stringify(styleId)};`,
             "if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css=\"${styleId}\"]`) === null) {",
             "  const tag = document.createElement('style');",
-            "  tag.dataset.plugin = '@lamplitisles/kepos-tts';",
+            "  tag.dataset.plugin = '@lamplitisles/kepos-speech';",
             "  tag.dataset.pluginCss = styleId;",
             "  tag.textContent = css;",
             "  document.head.appendChild(tag);",
@@ -82,7 +82,7 @@ export default defineConfig([
     external: dshExternals,
     outExtension: () => ({ js: ".js" }),
     banner: {
-      js: 'window.__ModuleLoader__.load({ id: "@lamplitisles/kepos-tts", factory: (require) => { var module = { exports: {} }; var exports = module.exports;'
+      js: 'window.__ModuleLoader__.load({ id: "@lamplitisles/kepos-speech", factory: (require) => { var module = { exports: {} }; var exports = module.exports;'
     },
     footer: { js: "return module.exports; } });" }
   }

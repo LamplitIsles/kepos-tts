@@ -136,7 +136,7 @@ async function authenticateRuntime(runtime: { launchUrl: string }): Promise<stri
   return cookie;
 }
 
-const temp = mkdtempSync(join(tmpdir(), "kepos-tts-pack-"));
+const temp = mkdtempSync(join(tmpdir(), "kepos-speech-pack-"));
 let runtime: { child: ChildProcess; baseUrl: string; launchUrl: string } | undefined;
 try {
   const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temp], { cwd: root, encoding: "utf8" })) as Array<{ filename: string }>;
@@ -158,13 +158,13 @@ try {
   }
 
   const install = join(home, "profiles", "web");
-  const packageDir = join(install, "node_modules", "@lamplitisles", "kepos-tts");
+  const packageDir = join(install, "node_modules", "@lamplitisles", "kepos-speech");
   const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
     name: string;
     peerDependencies?: Record<string, string>;
     dsh?: { client?: { platform?: string; inject?: string[] } };
   };
-  if (manifest.name !== "@lamplitisles/kepos-tts" || manifest.dsh?.client?.platform !== "web") {
+  if (manifest.name !== "@lamplitisles/kepos-speech" || manifest.dsh?.client?.platform !== "web") {
     throw new Error("installed manifest does not describe the DSH Web bundle");
   }
   if (manifest.peerDependencies?.["@deepseek-ai/cordis"] !== "4.0.2") {
@@ -186,8 +186,11 @@ try {
   }
 
   const patch = readFileSync(join(packageDir, "cordis.patch.yml"), "utf8");
-  for (const required of ["kepos-tts", "@lamplitisles/kepos-tts", "connection", "credentials", "settings", "systemPrompt", "sessions", "webServer"]) {
+  for (const required of ["kepos-speech", "@lamplitisles/kepos-speech", "connection", "credentials", "settings", "systemPrompt", "sessions", "webServer"]) {
     if (!patch.includes(required)) throw new Error(`Cordis patch is missing ${required}`);
+  }
+  for (const obsolete of ["kepos-tts", "@lamplitisles/kepos-tts"]) {
+    if (patch.includes(obsolete)) throw new Error(`Cordis patch still references obsolete identity ${obsolete}`);
   }
 
   runtime = await startRuntime(entry, env, runtimeCwd);
@@ -215,6 +218,7 @@ try {
   if (
     loaded?.id !== manifest.name ||
     typeof loaded.factory !== "function" ||
+    !clientCode.includes("Kepos Speech") ||
     !clientCode.includes('data-plugin-css') ||
     !/\.[A-Za-z0-9]+_player audio\{width:100%;height:32px\}/.test(clientCode) ||
     !clientCode.includes('"player":') ||
@@ -223,13 +227,14 @@ try {
     clientCode.includes("data:audio/") ||
     clientCode.includes('require("@deepseek-ai/dsh-credentials")') ||
     clientCode.includes('require("@deepseek-ai/schemastery")') ||
+    clientCode.includes("kepos-tts") ||
     clientCode.includes("@deepseek-ai/dsh-client-runtime") ||
     clientCode.includes("@deepseek-ai/dsh-host-apiproxy")
   ) {
     throw new Error("served client loader or inlined stylesheet is missing");
   }
 
-  const rpc = await jsonRequest(runtime.baseUrl, "/kepos-tts/synthesize", {
+  const rpc = await jsonRequest(runtime.baseUrl, "/kepos-speech/synthesize", {
     type: "client-request",
     rpcId: "pack-smoke-rpc",
     method: "synthesize",
@@ -251,7 +256,7 @@ try {
     rpcId?: string;
     result?: { ok?: boolean; value?: { namespaces?: Array<{ ns?: string; value?: { provider?: string; alibabaVoice?: string; bytedanceVoice?: string } }> } };
   };
-  const namespace = settingsEnvelope.result?.value?.namespaces?.find((candidate) => candidate.ns === "kepos-tts");
+  const namespace = settingsEnvelope.result?.value?.namespaces?.find((candidate) => candidate.ns === "kepos-speech");
   if (
     !settings.response.ok ||
     settingsEnvelope.type !== "server-response" ||

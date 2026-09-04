@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTaggedText, normalizeTtsText } from "../src/parser.js";
+import { parseTaggedText, normalizeSpeechText } from "../src/parser.js";
 
 describe("tagged assistant text", () => {
   it("keeps ordinary prose unchanged", () => {
@@ -12,7 +12,7 @@ describe("tagged assistant text", () => {
     expect(parsed.passage?.text).toBe("你好 朋友");
     expect(parsed.segments).toEqual([
       { kind: "text", text: "开场 " },
-      { kind: "tts", text: "你好 朋友", transcript: "你好 朋友" },
+      { kind: "speech", text: "你好 朋友", transcript: "你好 朋友" },
       { kind: "text", text: " 收尾" }
     ]);
   });
@@ -55,6 +55,6 @@ describe("tagged assistant text", () => {
   });
 
   it("normalizes Unicode whitespace", () => {
-    expect(normalizeTtsText("  甲\u00a0\n乙  ")).toBe("甲 乙");
+    expect(normalizeSpeechText("  甲\u00a0\n乙  ")).toBe("甲 乙");
   });
 });

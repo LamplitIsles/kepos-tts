@@ -17,15 +17,15 @@ import { RPC_CHANNEL, RPC_ENDPOINT, type BrowserAudioPayload } from "./rpc.js";
 import {
   SETTINGS_NAMESPACE,
   providerProfileKey,
-  type TtsSettings
+  type SpeechSettings
 } from "./constants.js";
-import { TtsAssistantNodeView, type ProfileSource } from "./client/assistant-node.js";
-import { TtsSettingsCard, decodeSettings, type ClientSettingsScope, type CredentialApi } from "./client/settings-card.js";
-import type { TtsRpcClient } from "./player.js";
+import { SpeechAssistantNodeView, type ProfileSource } from "./client/assistant-node.js";
+import { SpeechSettingsCard, decodeSettings, type ClientSettingsScope, type CredentialApi } from "./client/settings-card.js";
+import type { SpeechRpcClient } from "./player.js";
 
 export const inject = ["connection", "locale", "remote", "remote.credentials", "settingsScope", "slots"] as const;
 
-export type TtsLocaleKey =
+export type SpeechLocaleKey =
   | "title" | "description" | "provider" | "providerHint" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
   | "dashscopeApiKey" | "dashscopeApiKeyHint" | "volcengineApiKey" | "volcengineApiKeyHint"
   | "configured" | "notConfigured" | "expand" | "collapse" | "unsaved" | "save"
@@ -36,13 +36,13 @@ export type TtsLocaleKey =
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {
-    "kepos-tts": TtsLocaleKey;
+    "kepos-speech": SpeechLocaleKey;
   }
 }
 
-const en: Record<TtsLocaleKey, string> = {
-  title: "Text-to-Speech",
-  description: "Choose the provider and voice used to synthesize tagged assistant passages.",
+const en: Record<SpeechLocaleKey, string> = {
+  title: "Kepos Speech",
+  description: "Choose the provider and voice for tagged speech synthesis and short-audio recognition.",
   provider: "Provider",
   providerHint: "New passages use this provider after you save.",
   voice: "Voice ID",
@@ -78,9 +78,9 @@ const en: Record<TtsLocaleKey, string> = {
   "row.running": "Running"
 };
 
-const zh: Record<TtsLocaleKey, string> = {
-  title: "语音合成",
-  description: "选择语音合成使用的服务商和声音。",
+const zh: Record<SpeechLocaleKey, string> = {
+  title: "Kepos Speech",
+  description: "选择标记语音合成和短音频识别使用的服务商和声音。",
   provider: "服务商",
   providerHint: "保存后，新片段将使用此服务商。",
   voice: "声音 ID",
@@ -116,7 +116,7 @@ const zh: Record<TtsLocaleKey, string> = {
   "row.running": "运行中"
 };
 
-export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): TtsRpcClient {
+export function createSpeechRpcClient(connection: Pick<ConnectionHandle, "rpc">): SpeechRpcClient {
   return {
     async synthesize(text: string, sessionId: string, signal?: AbortSignal): Promise<BrowserAudioPayload> {
       const result = await connection.rpc.call(RPC_CHANNEL, RPC_ENDPOINT, { text, sessionId }, signal);
@@ -126,7 +126,7 @@ export function createTtsRpcClient(connection: Pick<ConnectionHandle, "rpc">): T
   };
 }
 
-export function createProfileSource(scope: Pick<SettingsScope<Partial<TtsSettings>>, "getSnapshot" | "subscribe">): ProfileSource & { dispose(): void } {
+export function createProfileSource(scope: Pick<SettingsScope<Partial<SpeechSettings>>, "getSnapshot" | "subscribe">): ProfileSource & { dispose(): void } {
   const profileFromSnapshot = () => {
     const snapshot = scope.getSnapshot();
     return snapshot.status === "ready" && snapshot.mode === "host" && snapshot.value !== undefined
@@ -155,9 +155,9 @@ export function createProfileSource(scope: Pick<SettingsScope<Partial<TtsSetting
 }
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(SETTINGS_NAMESPACE, { en, zh }), "kepos-tts: dictionaries");
+  ctx.effect(() => ctx.locale.register(SETTINGS_NAMESPACE, { en, zh }), "kepos-speech: dictionaries");
 
-  const scope = ctx.settingsScope.bind<Partial<TtsSettings>>({
+  const scope = ctx.settingsScope.bind<Partial<SpeechSettings>>({
     namespace: SETTINGS_NAMESPACE,
     decode: decodeSettings
   }) as ClientSettingsScope;
@@ -165,8 +165,8 @@ export function apply(ctx: ClientContext): void {
   const connection = clientContext.connection;
   const api: CredentialApi = { credentials: clientContext.remote.credentials };
   const profileSource = createProfileSource(scope);
-  ctx.effect(() => () => profileSource.dispose(), "kepos-tts: profile settings observer");
-  const client = createTtsRpcClient(connection);
+  ctx.effect(() => () => profileSource.dispose(), "kepos-speech: profile settings observer");
+  const client = createSpeechRpcClient(connection);
 
   ctx.slots.inject("settings.plugin.item", () => ctx.slots.register(
     {
@@ -176,7 +176,7 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({}),
       locale: SETTINGS_NAMESPACE
     } as never,
-    ((props: Record<string, unknown>) => createElement(TtsSettingsCard, {
+    ((props: Record<string, unknown>) => createElement(SpeechSettingsCard, {
       ...props,
       scope,
       api,
@@ -191,7 +191,7 @@ export function apply(ctx: ClientContext): void {
       priority: -1,
       locale: SETTINGS_NAMESPACE
     } as never,
-    ((props: Record<string, unknown>) => createElement(TtsAssistantNodeView, {
+    ((props: Record<string, unknown>) => createElement(SpeechAssistantNodeView, {
       ...props,
       client,
       profileSource
@@ -199,8 +199,8 @@ export function apply(ctx: ClientContext): void {
   ));
 }
 
-export { TtsAudioPlayer, TtsPlayer } from "./player.js";
-export { TtsSettingsCard, decodeSettings, describeCredential, saveCredential } from "./client/settings-card.js";
-export { TtsAssistantNodeView, renderAssistantBlocks, type ProfileSource } from "./client/assistant-node.js";
+export { SpeechAudioPlayer, SpeechPlayer } from "./player.js";
+export { SpeechSettingsCard, decodeSettings, describeCredential, saveCredential } from "./client/settings-card.js";
+export { SpeechAssistantNodeView, renderAssistantBlocks, type ProfileSource } from "./client/assistant-node.js";
 
 export default { inject, apply };

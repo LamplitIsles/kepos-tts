@@ -1,8 +1,9 @@
 {
-  "name": "@lamplitisles/kepos-tts",
+  "name": "@lamplitisles/kepos-speech",
   "version": "0.1.0",
-  "description": "Alibaba and ByteDance Chinese tagged text-to-speech for DeepSeek Harness Web",
+  "description": "Kepos Speech plugin for Alibaba and ByteDance Chinese speech synthesis plus short-audio recognition in DeepSeek Harness Web",
   "type": "module",
+  "packageManager": "bun@1.3.13",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -29,9 +30,13 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/lamplitisles/kepos-tts.git"
+    "url": "https://github.com/LamplitIsles/kepos-speech.git"
   },
   "dsh": {
     "bundle": {
@@ -79,7 +84,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsup",
-    "pack-smoke": "tsx scripts/pack-smoke.ts"
+    "pack-smoke": "tsx scripts/pack-smoke.ts",
+    "release:check": "tsx scripts/release-check.ts",
+    "release:pack": "tsx scripts/release-pack.ts"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-session": "0.1.2-alpha.3",

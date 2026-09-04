@@ -16,8 +16,8 @@ import type { AssistantBlock, RenderMessageImages } from "@deepseek-ai/dsh-clien
 import type { ChatNodeViewProps } from "@deepseek-ai/dsh-client-ui-chat/client";
 
 import { parseTaggedText, type TaggedTextSegment } from "../parser.js";
-import { TtsAudioPlayer, type TtsRpcClient } from "../player.js";
-import styles from "./tts.module.dshcss";
+import { SpeechAudioPlayer, type SpeechRpcClient } from "../player.js";
+import styles from "./speech.module.dshcss";
 
 // The block-family presentation below adapts the MIT-licensed
 // AssistantMarkdown/ReasoningRow presentation from the pinned DSH
@@ -36,7 +36,7 @@ const EMPTY_PROFILE_SOURCE: ProfileSource = {
 };
 
 type AssistantProps = ChatNodeViewProps<"assistant-step"> & {
-  client?: TtsRpcClient;
+  client?: SpeechRpcClient;
   profileSource?: ProfileSource;
 };
 
@@ -182,7 +182,7 @@ function normalText(
   mentions: unknown,
   labels?: MarkdownLabels
 ): ReactNode {
-  if (segment.kind === "tts") return null;
+  if (segment.kind === "speech") return null;
   return createElement(MarkdownText, {
     key,
     text: segment.text,
@@ -198,7 +198,7 @@ export interface RenderAssistantBlocksOptions {
   sessionId: string;
   mentions?: unknown | undefined;
   t: (key: string, params?: Record<string, unknown>) => string;
-  client?: TtsRpcClient | undefined;
+  client?: SpeechRpcClient | undefined;
   profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
   labels?: MarkdownLabels | undefined;
@@ -221,9 +221,9 @@ export function renderAssistantBlocks(blocks: readonly AssistantBlock[], options
         if (parsed.passage) {
           claimed = true;
           parsed.segments.forEach((segment, segmentIndex) => {
-            if (segment.kind === "tts") {
-              rendered.push(createElement(TtsAudioPlayer, {
-                key: `${index}-tts`,
+            if (segment.kind === "speech") {
+              rendered.push(createElement(SpeechAudioPlayer, {
+                key: `${index}-speech`,
                 text: segment.text,
                 transcript: segment.transcript,
                 profileKey,
@@ -303,7 +303,7 @@ interface AssistantMarkdownProps {
   sessionId: string;
   mentions?: unknown;
   t: (key: string, params?: Record<string, unknown>) => string;
-  client?: TtsRpcClient | undefined;
+  client?: SpeechRpcClient | undefined;
   profileKey?: string | undefined;
   renderMessageImages?: RenderMessageImages | undefined;
   reasoningHidden?: boolean | undefined;
@@ -355,7 +355,7 @@ function AssistantMarkdown({
   );
 }
 
-export function TtsAssistantNodeView(props: AssistantProps) {
+export function SpeechAssistantNodeView(props: AssistantProps) {
   const data = props.node.data;
   const source = props.profileSource ?? EMPTY_PROFILE_SOURCE;
   const profileKey = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);

@@ -1,0 +1,163 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+export const PACKAGE_NAME = "@lamplitisles/kepos-speech";
+export const REPOSITORY_URL = "https://github.com/LamplitIsles/kepos-speech.git";
+
+export const PUBLIC_PACKAGE = {
+  directory: ".",
+  name: PACKAGE_NAME,
+  requiredFiles: [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ]
+} as const;
+
+export const PUBLIC_PACKAGES = [PUBLIC_PACKAGE] as const;
+
+const tagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+/** Return the exact package version represented by a release tag. */
+export function versionFromTag(tag: string): string {
+  const match = tagPattern.exec(tag);
+  if (!match) {
+    throw new Error("Release tags must use v<semver>, for example v0.1.0 or v0.1.0-beta.1.");
+  }
+  return tag.slice(1);
+}
+
+/** Select npm's stable or prerelease distribution channel for a tag. */
+export function npmDistTag(tag: string): "latest" | "beta" {
+  versionFromTag(tag);
+  return tag.includes("-") ? "beta" : "latest";
+}
+
+export function readJson(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+}
+
+type PackedFile = { path?: string };
+type PackedPackage = {
+  id?: string;
+  name?: string;
+  version?: string;
+  filename?: string;
+  files?: PackedFile[];
+};
+
+export type PackedManifest = PackedPackage[] | Record<string, PackedPackage>;
+
+export function packedManifest(packed: PackedManifest): PackedPackage | undefined {
+  return Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
+}
+
+export function packedFilePaths(packed: PackedManifest): Set<string> {
+  const manifest = packedManifest(packed);
+  return new Set((manifest?.files ?? []).flatMap((file) => file.path === undefined ? [] : [file.path]));
+}
+
+function packageManifest(root: string): Record<string, unknown> {
+  return readJson(join(root, "package.json"));
+}
+
+/** Validate package metadata against the tag without invoking npm publish. */
+export function checkReleaseManifests(root: string, tag: string): string[] {
+  const errors: string[] = [];
+  let version: string;
+  try {
+    version = versionFromTag(tag);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Invalid release tag.");
+    return errors;
+  }
+
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = packageManifest(root);
+  } catch {
+    return ["package.json could not be read."];
+  }
+  if (manifest.name !== PACKAGE_NAME) errors.push(`${PACKAGE_NAME} has the wrong npm name.`);
+  if (manifest.version !== version) errors.push(`${PACKAGE_NAME} version does not match ${tag}.`);
+  const repository = manifest.repository as { url?: unknown } | undefined;
+  if (repository?.url !== REPOSITORY_URL) errors.push(`${PACKAGE_NAME} has the wrong repository.`);
+  if (manifest.private === true) errors.push(`${PACKAGE_NAME} must be publishable.`);
+  const publishConfig = manifest.publishConfig as { registry?: unknown; access?: unknown } | undefined;
+  if (publishConfig?.registry !== "https://registry.npmjs.org" || publishConfig.access !== "public") {
+    errors.push(`${PACKAGE_NAME} must publish publicly to npm.`);
+  }
+  if (JSON.stringify(manifest).includes("workspace:")) errors.push(`${PACKAGE_NAME} leaks a workspace protocol.`);
+  if (manifest.dependencies !== undefined || manifest.optionalDependencies !== undefined) {
+    errors.push(`${PACKAGE_NAME} must not have runtime dependencies.`);
+  }
+  const scripts = (manifest.scripts ?? {}) as Record<string, unknown>;
+  if (["install", "preinstall", "postinstall"].some((name) => name in scripts)) {
+    errors.push(`${PACKAGE_NAME} must not have install hooks.`);
+  }
+  const serialized = JSON.stringify(manifest);
+  for (const obsolete of ["kepos-tts", "@lamplitisles/kepos-tts", "KEPOS_TTS_"]) {
+    if (serialized.includes(obsolete)) errors.push(`${PACKAGE_NAME} contains obsolete TTS identity ${obsolete}.`);
+  }
+  return errors;
+}
+
+/** Validate the files npm would pack after a successful build. */
+export function checkPackedManifests(root: string): string[] {
+  const errors: string[] = [];
+  const manifestPath = join(root, "package.json");
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = readJson(manifestPath);
+  } catch {
+    return ["package.json could not be read."];
+  }
+  for (const required of PUBLIC_PACKAGE.requiredFiles) {
+    if (!existsSync(join(root, required))) {
+      errors.push(`${PACKAGE_NAME} is not built before release preflight.`);
+      return errors;
+    }
+  }
+
+  let packed: PackedManifest;
+  try {
+    packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--dry-run"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    })) as PackedManifest;
+  } catch {
+    errors.push(`${PACKAGE_NAME} could not produce a packed manifest.`);
+    return errors;
+  }
+  const packedEntry = packedManifest(packed);
+  if (packedEntry?.name !== PACKAGE_NAME) errors.push(`${PACKAGE_NAME} packed manifest has the wrong name.`);
+  if (packedEntry?.version !== manifest.version) errors.push(`${PACKAGE_NAME} packed manifest has the wrong version.`);
+  const files = packedFilePaths(packed);
+  for (const required of PUBLIC_PACKAGE.requiredFiles) {
+    if (!files.has(required)) errors.push(`${PACKAGE_NAME} packed manifest omits ${required}.`);
+  }
+  if ([...files].some((file) => file.includes("node_modules") || file.endsWith(".tgz"))) {
+    errors.push(`${PACKAGE_NAME} packed manifest contains an unsafe build artifact.`);
+  }
+  return errors;
+}
+
+/** Create the exact tarball that the publish job uploads and later publishes. */
+export function packRelease(root: string, destination: string): string {
+  mkdirSync(resolve(destination), { recursive: true });
+  const output = execFileSync("npm", ["pack", "--json", "--pack-destination", resolve(destination)], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const packed = JSON.parse(output) as PackedManifest;
+  const entry = packedManifest(packed);
+  if (!entry?.filename || entry.name !== PACKAGE_NAME) throw new Error(`${PACKAGE_NAME} did not produce the expected release tarball.`);
+  return join(resolve(destination), entry.filename);
+}

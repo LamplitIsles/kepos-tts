@@ -1,8 +1,8 @@
 /** Shared settings and provider identity for the host and browser halves. */
-export const SETTINGS_NAMESPACE = "kepos-tts";
+export const SETTINGS_NAMESPACE = "kepos-speech";
 
-export const ALIBABA_CREDENTIAL_REF = "KEPOS_TTS_DASHSCOPE_API_KEY";
-export const BYTEDANCE_CREDENTIAL_REF = "KEPOS_TTS_VOLCENGINE_API_KEY";
+export const ALIBABA_CREDENTIAL_REF = "KEPOS_SPEECH_DASHSCOPE_API_KEY";
+export const BYTEDANCE_CREDENTIAL_REF = "KEPOS_SPEECH_VOLCENGINE_API_KEY";
 
 export const DASHSCOPE_ENDPOINT =
   "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
@@ -53,34 +53,34 @@ export type QwenAsrExpression = (typeof QWEN_ASR_EXPRESSIONS)[number];
 export const BYTEDANCE_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse";
 export const BYTEDANCE_RESOURCE_ID = "seed-tts-2.0";
 
-export const TTS_MAX_CHARS = 240;
+export const SPEECH_MAX_CHARS = 240;
 export const VOICE_ID_MAX_LENGTH = 128;
 
 export const DEFAULT_PROVIDER = "alibaba" as const;
 export const DEFAULT_ALIBABA_VOICE = "Maia";
 export const DEFAULT_BYTEDANCE_VOICE = "zh_female_sajiaoxuemei_uranus_bigtts";
 
-export const TTS_PROVIDERS = ["alibaba", "bytedance"] as const;
-export type TtsProvider = (typeof TTS_PROVIDERS)[number];
+export const SPEECH_PROVIDERS = ["alibaba", "bytedance"] as const;
+export type SpeechProvider = (typeof SPEECH_PROVIDERS)[number];
 
-export interface TtsSettings {
-  provider: TtsProvider;
+export interface SpeechSettings {
+  provider: SpeechProvider;
   alibabaVoice: string;
   bytedanceVoice: string;
 }
 
 /** The normalized provider profile used by synthesis and cache identity. */
-export interface TtsProfile {
-  provider: TtsProvider;
+export interface SpeechProfile {
+  provider: SpeechProvider;
   voice: string;
   /** Provider model/resource identity; never supplied by the browser. */
   model: string;
   credentialRef: string;
 }
 
-export function normalizeProvider(value: unknown): TtsProvider {
-  return typeof value === "string" && (TTS_PROVIDERS as readonly string[]).includes(value)
-    ? value as TtsProvider
+export function normalizeProvider(value: unknown): SpeechProvider {
+  return typeof value === "string" && (SPEECH_PROVIDERS as readonly string[]).includes(value)
+    ? value as SpeechProvider
     : DEFAULT_PROVIDER;
 }
 
@@ -92,7 +92,7 @@ export function normalizeVoiceId(value: unknown, fallback: string): string {
   return normalized;
 }
 
-export function normalizeSettings(value: unknown): TtsSettings {
+export function normalizeSettings(value: unknown): SpeechSettings {
   const record = typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
@@ -103,7 +103,7 @@ export function normalizeSettings(value: unknown): TtsSettings {
   };
 }
 
-export function profileFromSettings(value: unknown): TtsProfile {
+export function profileFromSettings(value: unknown): SpeechProfile {
   const settings = normalizeSettings(value);
   if (settings.provider === "bytedance") {
     return {

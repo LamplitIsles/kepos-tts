@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@lamplitisles/kepos-tts",
+      "name": "@lamplitisles/kepos-speech",
       "devDependencies": {
         "@deepseek-ai/dsh-client-ui-session": "0.1.2-alpha.3",
         "@deepseek-ai/dsh-system-prompt": "0.1.2-alpha.3",

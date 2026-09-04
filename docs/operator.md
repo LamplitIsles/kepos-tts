@@ -1,4 +1,4 @@
-# Kepos TTS operator notes
+# Kepos Speech operator notes
 
 This package is intended for a disposable or locally managed DSH Web bundle.
 Build the package with Bun, run the typecheck/tests, and inspect the packed
@@ -14,8 +14,8 @@ loopback DSH Web Settings session. The defaults are `Maia` and
 characters). The DashScope key is always shown as a write-only field labelled
 shared by Alibaba TTS and Qwen speech recognition, even when ByteDance is the
 selected TTS provider. The Volcengine key is shown only for ByteDance TTS. DSH
-stores DashScope under `KEPOS_TTS_DASHSCOPE_API_KEY` and ByteDance under
-`KEPOS_TTS_VOLCENGINE_API_KEY`; there is no agenix or remote configuration
+stores DashScope under `KEPOS_SPEECH_DASHSCOPE_API_KEY` and ByteDance under
+`KEPOS_SPEECH_VOLCENGINE_API_KEY`; there is no agenix or remote configuration
 endpoint. The provider selector is TTS-only: Qwen ASR is the sole STT provider,
 with no STT selector. An unavailable or memory-backed remote Settings scope does not
 render this card; a ready non-writable Host scope is read-only. Tagged TTS
@@ -26,7 +26,7 @@ the browser's native audio player. If synthesis fails, the transcript stays
 visible.
 
 While the plugin is mounted, Host consumers can optionally read
-`ctx.get("keposTts")` and call `synthesize({ sessionId, text }, signal?)` for
+`ctx.get("keposSpeech")` and call `synthesize({ sessionId, text }, signal?)` for
 one bounded `{ mediaType: "audio/mpeg", data: Uint8Array }` result. The
 service shares the same validation, provider credentials, and workspace cache
 as browser TTS, and disappears when the plugin is disposed. It never exposes a
@@ -44,14 +44,13 @@ discrete speech-expression label; this synchronous model does not provide
 sentence timestamps. The label is model-derived speech-expression metadata,
 not a psychological assessment or fact about the speaker. Audio, transcripts,
 raw provider responses, and credentials are neither stored nor included in
-failures or diagnostics. The service remains a temporary TTS-named Host seam
-pending a future user-approved rename; Matrix and Companion adapters are not
-part of this package.
+failures or diagnostics. The service is the stable Speech-named Host seam;
+Matrix and Companion adapters are not part of this package.
 
 Artifacts live under the session's immutable workspace cwd at
-`.dsh/kepos-tts/audio/<sha256>.mp3`. The digest includes the normalized passage,
+`.dsh/kepos-speech/audio/<sha256>.mp3`. The digest includes the normalized passage,
 provider, model/resource, Voice ID, and cache format. The Host validates the
-session and digest again when serving `/kepos-tts/audio/<digest>.mp3?sessionId=...`,
+session and digest again when serving `/kepos-speech/audio/<digest>.mp3?sessionId=...`,
 so a client cannot select another workspace path. Cache writes are bounded and
 atomic; a second request, another gateway instance, or a later page visit
 reuses the matching provider artifact without another provider call. Remove

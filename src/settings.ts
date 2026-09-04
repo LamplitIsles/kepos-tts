@@ -6,7 +6,7 @@ import {
   DEFAULT_ALIBABA_VOICE,
   DEFAULT_BYTEDANCE_VOICE,
   DEFAULT_PROVIDER,
-  TTS_PROVIDERS,
+  SPEECH_PROVIDERS,
   VOICE_ID_MAX_LENGTH
 } from "./constants.js";
 
@@ -26,15 +26,15 @@ function voiceSchema(fallback: string) {
 const alibabaVoice = voiceSchema(DEFAULT_ALIBABA_VOICE);
 const bytedanceVoice = voiceSchema(DEFAULT_BYTEDANCE_VOICE);
 
-const ttsSettingsShape = z.object({
-  provider: z.union(TTS_PROVIDERS).default(DEFAULT_PROVIDER).loose(true),
+const speechSettingsShape = z.object({
+  provider: z.union(SPEECH_PROVIDERS).default(DEFAULT_PROVIDER).loose(true),
   alibabaVoice,
   bytedanceVoice
 });
 
 /** Resolve only the current flat provider fields; obsolete unknown keys drop out. */
-export const TtsSettingsSchema = z.transform(
-  ttsSettingsShape,
+export const SpeechSettingsSchema = z.transform(
+  speechSettingsShape,
   (value) => ({
     provider: value.provider,
     alibabaVoice: value.alibabaVoice,
@@ -47,4 +47,4 @@ export const TtsSettingsSchema = z.transform(
   bytedanceVoice: DEFAULT_BYTEDANCE_VOICE
 }).loose(true);
 
-export type { TtsSettings } from "./constants.js";
+export type { SpeechSettings } from "./constants.js";

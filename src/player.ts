@@ -1,29 +1,29 @@
 import { createElement, useEffect, useRef, useSyncExternalStore } from "react";
 
 import type { BrowserAudioPayload } from "./rpc.js";
-import { normalizeTtsText } from "./parser.js";
-import styles from "./client/tts.module.dshcss";
+import { normalizeSpeechText } from "./parser.js";
+import styles from "./client/speech.module.dshcss";
 
-export type TtsPlayerStatus = "idle" | "loading" | "ready" | "error";
+export type SpeechPlayerStatus = "idle" | "loading" | "ready" | "error";
 
-export interface TtsPlayerSnapshot {
-  status: TtsPlayerStatus;
+export interface SpeechPlayerSnapshot {
+  status: SpeechPlayerStatus;
   error?: string;
 }
 
-export interface TtsRpcClient {
+export interface SpeechRpcClient {
   /** Session identity is sent with the finalized passage, never a cache path. */
   synthesize(text: string, sessionId: string, signal?: AbortSignal): Promise<BrowserAudioPayload>;
 }
 
-export interface TtsAudioPlayerProps {
+export interface SpeechAudioPlayerProps {
   text: string;
   transcript?: string;
   /** Secret-free normalized provider profile identity from a ready Host Settings snapshot. */
   profileKey?: string | undefined;
   /** Framework-provided session identity used by the Host to resolve cwd. */
   sessionId: string;
-  client: TtsRpcClient;
+  client: SpeechRpcClient;
   labels?: Partial<{ preparing: string; audio: string; failed: string }>;
   className?: string;
 }
@@ -40,7 +40,7 @@ interface CachedAudio {
 
 const preparationCaches = new WeakMap<object, Map<string, PreparationEntry>>();
 
-function cacheFor(client: TtsRpcClient): Map<string, PreparationEntry> {
+function cacheFor(client: SpeechRpcClient): Map<string, PreparationEntry> {
   let cache = preparationCaches.get(client as object);
   if (!cache) {
     cache = new Map();
@@ -50,7 +50,7 @@ function cacheFor(client: TtsRpcClient): Map<string, PreparationEntry> {
 }
 
 function preparationKey(text: string, profileKey: string | undefined, sessionId: string): string {
-  return JSON.stringify([sessionId, profileKey ?? null, normalizeTtsText(text)]);
+  return JSON.stringify([sessionId, profileKey ?? null, normalizeSpeechText(text)]);
 }
 
 function validPayload(payload: BrowserAudioPayload): BrowserAudioPayload {
@@ -61,29 +61,29 @@ function validPayload(payload: BrowserAudioPayload): BrowserAudioPayload {
 }
 
 /** Drop page-memory preparation indexes (the durable workspace files remain). */
-export function clearTtsPreparationCache(client?: TtsRpcClient): void {
+export function clearSpeechPreparationCache(client?: SpeechRpcClient): void {
   if (client) preparationCaches.delete(client as object);
 }
 
 /** Fetches tagged speech immediately while sharing page-level work by session/text/profile. */
-export class TtsPlayer {
-  private snapshot: TtsPlayerSnapshot = { status: "idle" };
+export class SpeechPlayer {
+  private snapshot: SpeechPlayerSnapshot = { status: "idle" };
   private readonly listeners = new Set<() => void>();
   private cached: CachedAudio | undefined;
   private currentKey: string | undefined;
   private generation = 0;
   private disposed = false;
 
-  constructor(private readonly client: TtsRpcClient) {}
+  constructor(private readonly client: SpeechRpcClient) {}
 
-  getSnapshot = (): TtsPlayerSnapshot => this.snapshot;
+  getSnapshot = (): SpeechPlayerSnapshot => this.snapshot;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
 
-  private publish(snapshot: TtsPlayerSnapshot): void {
+  private publish(snapshot: SpeechPlayerSnapshot): void {
     this.snapshot = snapshot;
     for (const listener of this.listeners) listener();
   }
@@ -118,7 +118,7 @@ export class TtsPlayer {
 
   async prepare(text: string, profileKey: string | undefined, sessionId: string): Promise<void> {
     if (this.disposed) return;
-    const normalized = normalizeTtsText(text);
+    const normalized = normalizeSpeechText(text);
     const key = preparationKey(normalized, profileKey, sessionId);
     const generation = ++this.generation;
     this.currentKey = key;
@@ -173,7 +173,7 @@ export class TtsPlayer {
   }
 }
 
-export function TtsAudioPlayer({
+export function SpeechAudioPlayer({
   text,
   transcript = text,
   profileKey,
@@ -181,10 +181,10 @@ export function TtsAudioPlayer({
   client,
   labels,
   className
-}: TtsAudioPlayerProps) {
-  const playerRef = useRef<TtsPlayer | null>(null);
+}: SpeechAudioPlayerProps) {
+  const playerRef = useRef<SpeechPlayer | null>(null);
   if (!playerRef.current) {
-    const player = new TtsPlayer(client);
+    const player = new SpeechPlayer(client);
     player.hydrate(text, profileKey, sessionId);
     playerRef.current = player;
   }
@@ -203,7 +203,7 @@ export function TtsAudioPlayer({
   if (snapshot.status === "ready" && src) {
     return createElement(
       "div",
-      { className: classes, "data-tts-state": snapshot.status },
+      { className: classes, "data-speech-state": snapshot.status },
       createElement("span", { className: styles.playerLabel }, labels?.audio ?? "Audio message"),
       createElement("audio", {
         controls: true,
@@ -217,14 +217,14 @@ export function TtsAudioPlayer({
   if (snapshot.status === "error") {
     return createElement(
       "div",
-      { className: classes, "data-tts-state": snapshot.status },
-      createElement("span", { className: styles.transcript, "data-tts-transcript": true }, transcript),
+      { className: classes, "data-speech-state": snapshot.status },
+      createElement("span", { className: styles.transcript, "data-speech-transcript": true }, transcript),
       createElement("span", { className: styles.error, role: "status" }, labels?.failed ?? "Audio unavailable; transcript shown.")
     );
   }
   return createElement(
     "div",
-    { className: classes, "data-tts-state": snapshot.status, "aria-busy": true },
+    { className: classes, "data-speech-state": snapshot.status, "aria-busy": true },
     createElement("span", { className: styles.preparing, role: "status" }, labels?.preparing ?? "Preparing audio…")
   );
 }

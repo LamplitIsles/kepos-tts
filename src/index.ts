@@ -4,25 +4,25 @@ import {
   DEFAULT_ALIBABA_VOICE,
   DEFAULT_BYTEDANCE_VOICE,
   DEFAULT_PROVIDER,
-  TtsSettingsSchema,
+  SpeechSettingsSchema,
   SETTINGS_NAMESPACE,
 } from "./settings.js";
 import {
-  KEPOS_TTS_SERVICE,
-  TtsGateway,
-  createKeposTtsService,
-  registerTtsAudioRoute,
-  registerTtsRpc,
-  type KeposTtsService,
+  KEPOS_SPEECH_SERVICE,
+  SpeechGateway,
+  createKeposSpeechService,
+  registerSpeechAudioRoute,
+  registerSpeechRpc,
+  type KeposSpeechService,
   type SessionResolver
 } from "./gateway.js";
-import { registerTtsPrompt } from "./prompt.js";
+import { registerSpeechPrompt } from "./prompt.js";
 
-export const name = "kepos-tts";
+export const name = "kepos-speech";
 export const inject = ["connection", "credentials", "settings", "systemPrompt", "sessions", "webServer"] as const;
 
 type HostContext = Context & {
-  connection: { rpc: Parameters<typeof registerTtsRpc>[0] };
+  connection: { rpc: Parameters<typeof registerSpeechRpc>[0] };
   credentials: { resolve: (ref: ReturnType<typeof import("@deepseek-ai/dsh-credentials").credentialRef>) => Promise<{ value: string; source: string } | undefined> };
   settings: {
     register: (namespace: unknown, schema: unknown, options?: unknown) => { get(): unknown };
@@ -30,7 +30,7 @@ type HostContext = Context & {
   systemPrompt: { section: (section: unknown) => () => void };
   sessions: SessionResolver;
   webServer: {
-    register: Parameters<typeof registerTtsAudioRoute>[0]["register"];
+    register: Parameters<typeof registerSpeechAudioRoute>[0]["register"];
   };
   provide: (name: string, value: unknown) => () => void;
 };
@@ -38,7 +38,7 @@ type HostContext = Context & {
 export function apply(ctx: HostContext): void {
   const settings = ctx.settings.register(
     SETTINGS_NAMESPACE,
-    TtsSettingsSchema,
+    SpeechSettingsSchema,
     {
       base: {
         provider: DEFAULT_PROVIDER,
@@ -48,32 +48,32 @@ export function apply(ctx: HostContext): void {
       applies: "live"
     }
   );
-  const gateway = new TtsGateway({
+  const gateway = new SpeechGateway({
     credentials: ctx.credentials,
     sessions: ctx.sessions,
     getSettings: () => settings.get(),
-    onFailure: (failure) => console.error("[kepos-tts] synthesis failed", failure)
+    onFailure: (failure) => console.error("[kepos-speech] synthesis failed", failure)
   });
-  registerTtsRpc(ctx.connection.rpc, gateway);
-  ctx.provide(KEPOS_TTS_SERVICE, createKeposTtsService(gateway) satisfies KeposTtsService);
-  ctx.effect(() => registerTtsAudioRoute(ctx.webServer, ctx.sessions), "kepos-tts: audio route");
-  registerTtsPrompt(ctx);
+  registerSpeechRpc(ctx.connection.rpc, gateway);
+  ctx.provide(KEPOS_SPEECH_SERVICE, createKeposSpeechService(gateway) satisfies KeposSpeechService);
+  ctx.effect(() => registerSpeechAudioRoute(ctx.webServer, ctx.sessions), "kepos-speech: audio route");
+  registerSpeechPrompt(ctx);
 }
 
 export {
-  TtsGateway,
-  TtsGatewayError,
-  KEPOS_TTS_SERVICE,
-  createKeposTtsService,
-  registerTtsAudioRoute,
-  registerTtsRpc,
+  SpeechGateway,
+  SpeechGatewayError,
+  KEPOS_SPEECH_SERVICE,
+  createKeposSpeechService,
+  registerSpeechAudioRoute,
+  registerSpeechRpc,
   RPC_CHANNEL,
   RPC_ENDPOINT,
-  type KeposTtsAudio,
-  type KeposTtsService,
-  type KeposTtsSynthesisRequest,
-  type KeposTtsTranscription,
-  type KeposTtsTranscriptionRequest
+  type KeposSpeechAudio,
+  type KeposSpeechService,
+  type KeposSpeechSynthesisRequest,
+  type KeposSpeechTranscription,
+  type KeposSpeechTranscriptionRequest
 } from "./gateway.js";
 export * from "./core.js";
 

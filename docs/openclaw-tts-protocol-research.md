@@ -3,7 +3,7 @@
 Researched 2026-08-30 against OpenClaw `main` commit
 [`4432c568`](https://github.com/openclaw/openclaw/tree/4432c568ae330480b50d2aca29b91c5d311d010e).
 
-## Decision for Kepos TTS
+## Decision for Kepos Speech
 
 Use exactly this one form in the Kepos prompt and parser:
 
