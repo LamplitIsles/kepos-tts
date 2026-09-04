@@ -86,7 +86,8 @@
     "build": "tsup",
     "pack-smoke": "tsx scripts/pack-smoke.ts",
     "release:check": "tsx scripts/release-check.ts",
-    "release:pack": "tsx scripts/release-pack.ts"
+    "release:pack": "tsx scripts/release-pack.ts",
+    "release:sync-version": "tsx scripts/sync-release-version.ts"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",

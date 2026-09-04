@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { releaseCheck } from "../scripts/release-check.js";
 import { npmDistTag, versionFromTag } from "../scripts/release-shared.js";
+import { synchronizeReleaseVersion } from "../scripts/sync-release-version.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -50,5 +51,14 @@ describe("release tag preflight", () => {
       "@lamplitisles/kepos-speech version does not match v1.2.4."
     );
     expect(releaseCheck(root, "v1.2.3", false)).toEqual([]);
+  });
+
+  it("synchronizes the manifest from a release tag before preflight", async () => {
+    const root = await fixture("0.1.0-beta.0");
+
+    await synchronizeReleaseVersion(root, "v0.2.0");
+
+    expect(JSON.parse(await readFile(join(root, "package.json"), "utf8")).version).toBe("0.2.0");
+    expect(releaseCheck(root, "v0.2.0", false)).toEqual([]);
   });
 });
