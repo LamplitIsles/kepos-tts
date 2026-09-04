@@ -30,8 +30,8 @@ function dshEntry(): string {
   } catch {
     throw new Error("pack-smoke could not query the installed DSH CLI version");
   }
-  if (version !== "0.1.2-alpha.3") {
-    throw new Error(`pack-smoke requires DSH 0.1.2-alpha.3, found ${version || "unknown"}`);
+  if (version !== "0.1.2-alpha.5") {
+    throw new Error(`pack-smoke requires DSH 0.1.2-alpha.5, found ${version || "unknown"}`);
   }
   return entry;
 }
@@ -171,7 +171,7 @@ try {
     throw new Error("packed manifest is not pinned to Cordis 4.0.2");
   }
   for (const [name, version] of Object.entries(manifest.peerDependencies ?? {})) {
-    if (name.startsWith("@deepseek-ai/dsh-") && version !== "0.1.2-alpha.3") {
+    if (name.startsWith("@deepseek-ai/dsh-") && version !== "0.1.2-alpha.5") {
       throw new Error(`packed manifest has a non-alpha DSH peer: ${name}@${version}`);
     }
   }

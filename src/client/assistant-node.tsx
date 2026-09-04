@@ -21,7 +21,7 @@ import styles from "./speech.module.dshcss";
 
 // The block-family presentation below adapts the MIT-licensed
 // AssistantMarkdown/ReasoningRow presentation from the pinned DSH
-// 0.1.2-alpha.3 release (@deepseek-ai/dsh-client-ui-chat). It keeps
+// 0.1.2-alpha.5 release (@deepseek-ai/dsh-client-ui-chat). It keeps
 // markdown, reasoning, images, unknown blocks, interruption markers, and file
 // mentions intact while changing only finalized prose rendering.
 
