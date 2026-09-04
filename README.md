@@ -105,31 +105,25 @@ version:
 
    This prerelease is deliberately distinct from the later stable `0.1.0`;
    do not manually publish `0.1.0`.
-2. Change `package.json` to version `0.1.0` and commit that change, then
-   configure npm Trusted Publishing for
+2. Configure npm Trusted Publishing for
    `@lamplitisles/kepos-speech`, repository
    `LamplitIsles/kepos-speech`, workflow
    `.github/workflows/release.yml`, and the GitHub `npm` environment.
 3. Create the protected GitHub `npm` environment with the required approval
    policy.
 
-For the first stable trusted publish, rerun the checks with the stable version,
-push the committed version change, and create the tag with the supported `og`
-operation (`og tag --help` describes this as “Create and push a tag”):
+For the first stable trusted publish, push the intended release commit and
+create the tag with the supported `og` operation (`og tag --help` describes
+this as “Create and push a tag”). CI synchronizes its disposable package
+manifest from that tag before checks and publication:
 
 ```sh
-bun install --frozen-lockfile
-bun run typecheck
-bun run test
-bun run build
-GITHUB_REF_NAME=v0.1.0 bun run release:check
 og push
 og tag v0.1.0
 ```
 
-For each subsequent release, update `package.json` to the intended version,
-run the local checks, push the committed change with `og push`, and create its
-semantic version tag with `og tag v<version>` (for example, `og tag
+For each subsequent release, push the intended change with `og push`, and
+create its semantic version tag with `og tag v<version>` (for example, `og tag
 v0.2.0-beta.1`). Tags must be `v<semver>` (for example `v0.1.0` or
 `v0.2.0-beta.1`). Every purely numeric prerelease segment must be `0` or a
 non-zero number without leading zeroes: `v1.2.3-0` and `v1.2.3-alpha01` are
