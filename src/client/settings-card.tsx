@@ -8,17 +8,17 @@ import {
   DEFAULT_ALIBABA_VOICE,
   DEFAULT_BYTEDANCE_VOICE,
   SETTINGS_NAMESPACE,
-  TTS_PROVIDERS,
+  SPEECH_PROVIDERS,
   VOICE_ID_MAX_LENGTH,
   normalizeProvider,
   normalizeSettings,
   normalizeVoiceId,
-  type TtsProvider,
-  type TtsSettings
+  type SpeechProvider,
+  type SpeechSettings
 } from "../constants.js";
-import styles from "./tts.module.dshcss";
+import styles from "./speech.module.dshcss";
 
-export type ClientSettingsScope = SettingsScope<Partial<TtsSettings>>;
+export type ClientSettingsScope = SettingsScope<Partial<SpeechSettings>>;
 
 export interface CredentialStatus {
   configured: boolean;
@@ -33,7 +33,7 @@ export interface CredentialApi {
   };
 }
 
-export interface TtsSettingsCardProps {
+export interface SpeechSettingsCardProps {
   scope: ClientSettingsScope;
   api: CredentialApi;
   /** DSH Settings/credential writes are only permitted from loopback Web. */
@@ -68,27 +68,27 @@ export interface TtsSettingsCardProps {
 }
 
 const DEFAULT_STATUS: CredentialStatus = { configured: false, writable: false };
-const DEFAULT_STATUSES: Record<TtsProvider, CredentialStatus> = {
+const DEFAULT_STATUSES: Record<SpeechProvider, CredentialStatus> = {
   alibaba: DEFAULT_STATUS,
   bytedance: DEFAULT_STATUS
 };
-const EMPTY_DRAFT_KEYS: Record<TtsProvider, string> = { alibaba: "", bytedance: "" };
+const EMPTY_DRAFT_KEYS: Record<SpeechProvider, string> = { alibaba: "", bytedance: "" };
 
 interface PreservedDraftAttempt {
-  provider: TtsProvider | undefined;
-  voices: Partial<Record<TtsProvider, string>>;
-  keys: Record<TtsProvider, string>;
+  provider: SpeechProvider | undefined;
+  voices: Partial<Record<SpeechProvider, string>>;
+  keys: Record<SpeechProvider, string>;
 }
 
-function credentialRefFor(provider: TtsProvider): string {
+function credentialRefFor(provider: SpeechProvider): string {
   return provider === "bytedance" ? BYTEDANCE_CREDENTIAL_REF : ALIBABA_CREDENTIAL_REF;
 }
 
-function voiceFieldFor(provider: TtsProvider): "alibabaVoice" | "bytedanceVoice" {
+function voiceFieldFor(provider: SpeechProvider): "alibabaVoice" | "bytedanceVoice" {
   return provider === "bytedance" ? "bytedanceVoice" : "alibabaVoice";
 }
 
-function defaultVoiceFor(provider: TtsProvider): string {
+function defaultVoiceFor(provider: SpeechProvider): string {
   return provider === "bytedance" ? DEFAULT_BYTEDANCE_VOICE : DEFAULT_ALIBABA_VOICE;
 }
 
@@ -127,7 +127,7 @@ export async function saveCredential(api: CredentialApi, value: string, ref = AL
   }
 }
 
-export function decodeSettings(value: unknown): Partial<TtsSettings> {
+export function decodeSettings(value: unknown): Partial<SpeechSettings> {
   return normalizeSettings(value);
 }
 
@@ -146,14 +146,14 @@ function validateVoiceDraft(value: string | undefined, fallback: string): string
  * A compact DSH-native disclosure card with durable baseline/draft semantics.
  * Secrets are write-only and never read back.
  */
-export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: TtsSettingsCardProps) {
+export function SpeechSettingsCard({ scope, api, localOnly = true, t, labels }: SpeechSettingsCardProps) {
   const initialSnapshot = scope.getSnapshot();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [baseline, setBaseline] = useState<TtsSettings>(() => normalizeSettings(initialSnapshot.value));
-  const [draftProvider, setDraftProvider] = useState<TtsProvider | undefined>();
-  const [draftVoices, setDraftVoices] = useState<Partial<Record<TtsProvider, string>>>({});
-  const [draftKeys, setDraftKeys] = useState<Record<TtsProvider, string>>(EMPTY_DRAFT_KEYS);
-  const [credentials, setCredentials] = useState<Record<TtsProvider, CredentialStatus>>(DEFAULT_STATUSES);
+  const [baseline, setBaseline] = useState<SpeechSettings>(() => normalizeSettings(initialSnapshot.value));
+  const [draftProvider, setDraftProvider] = useState<SpeechProvider | undefined>();
+  const [draftVoices, setDraftVoices] = useState<Partial<Record<SpeechProvider, string>>>({});
+  const [draftKeys, setDraftKeys] = useState<Record<SpeechProvider, string>>(EMPTY_DRAFT_KEYS);
+  const [credentials, setCredentials] = useState<Record<SpeechProvider, CredentialStatus>>(DEFAULT_STATUSES);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -174,8 +174,8 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
       return current === nextBaseline.provider ? undefined : current;
     });
     setDraftVoices((current) => {
-      const nextDrafts: Partial<Record<TtsProvider, string>> = {};
-      for (const provider of TTS_PROVIDERS) {
+      const nextDrafts: Partial<Record<SpeechProvider, string>> = {};
+      for (const provider of SPEECH_PROVIDERS) {
         const draft = current[provider];
         const preservedDraft = preservedAttempt?.voices[provider];
         if (preservedDraft !== undefined) {
@@ -195,7 +195,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   useEffect(() => {
     if (snapshot.status !== "ready" || snapshot.mode !== "host") return;
     let active = true;
-    void Promise.all(TTS_PROVIDERS.map(async (provider) => [provider, await describeCredential(api, credentialRefFor(provider))] as const))
+    void Promise.all(SPEECH_PROVIDERS.map(async (provider) => [provider, await describeCredential(api, credentialRefFor(provider))] as const))
       .then((entries) => {
         if (!active) return;
         setCredentials((current) => {
@@ -217,21 +217,21 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const voiceError = validateVoiceDraft(selectedDraftVoice, defaultVoiceFor(selectedProvider));
 
   const providerDirty = draftProvider !== undefined && draftProvider !== baseline.provider;
-  const voiceDirty = TTS_PROVIDERS.some((provider) => {
+  const voiceDirty = SPEECH_PROVIDERS.some((provider) => {
     const draft = draftVoices[provider];
     return draft !== undefined && normalizeVoiceId(draft, defaultVoiceFor(provider)) !== baseline[voiceFieldFor(provider)];
   });
-  const keyDirty = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "");
-  const invalidVoice = TTS_PROVIDERS.some((provider) => validateVoiceDraft(draftVoices[provider], defaultVoiceFor(provider)) !== undefined);
-  const dirty = providerDirty || voiceDirty || keyDirty || TTS_PROVIDERS.some((provider) => draftVoices[provider] !== undefined);
+  const keyDirty = SPEECH_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "");
+  const invalidVoice = SPEECH_PROVIDERS.some((provider) => validateVoiceDraft(draftVoices[provider], defaultVoiceFor(provider)) !== undefined);
+  const dirty = providerDirty || voiceDirty || keyDirty || SPEECH_PROVIDERS.some((provider) => draftVoices[provider] !== undefined);
   const canWriteSettings = localOnly && snapshot.mode === "host" && snapshot.writable;
-  const canWriteCredential = (provider: TtsProvider): boolean => canWriteSettings && credentials[provider]?.writable === true;
-  const credentialBlocked = TTS_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "" && !canWriteCredential(provider));
+  const canWriteCredential = (provider: SpeechProvider): boolean => canWriteSettings && credentials[provider]?.writable === true;
+  const credentialBlocked = SPEECH_PROVIDERS.some((provider) => (draftKeys[provider] ?? "").trim() !== "" && !canWriteCredential(provider));
   const canSave = dirty && !saving && canWriteSettings && !credentialBlocked && !invalidVoice;
 
   const text = {
-    title: t?.("title") ?? "Text-to-Speech",
-    description: t?.("description") ?? "Choose the provider and voice used to synthesize tagged assistant passages.",
+    title: t?.("title") ?? "Kepos Speech",
+    description: t?.("description") ?? "Choose the provider and voice for tagged speech synthesis and short-audio recognition.",
     provider: t?.("provider") ?? "Provider",
     providerHint: t?.("providerHint") ?? "New passages use this provider after you save.",
     voice: t?.("voice") ?? "Voice ID",
@@ -277,7 +277,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     if (preserved) preservedAttemptRef.current = { ...preserved, provider: undefined };
   };
 
-  const forgetPreservedVoice = (provider: TtsProvider) => {
+  const forgetPreservedVoice = (provider: SpeechProvider) => {
     const preserved = preservedAttemptRef.current;
     if (!preserved) return;
     const voices = { ...preserved.voices };
@@ -285,7 +285,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     preservedAttemptRef.current = { ...preserved, voices };
   };
 
-  const forgetPreservedKey = (provider: TtsProvider) => {
+  const forgetPreservedKey = (provider: SpeechProvider) => {
     const preserved = preservedAttemptRef.current;
     if (!preserved) return;
     const keys = { ...preserved.keys };
@@ -309,7 +309,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     setFailed(false);
   };
 
-  const editCredential = (provider: TtsProvider, event: { target: { value: string } }) => {
+  const editCredential = (provider: SpeechProvider, event: { target: { value: string } }) => {
     if (!canWriteCredential(provider) || saving) return;
     const value = event.target.value;
     forgetPreservedKey(provider);
@@ -338,18 +338,18 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     preservedAttemptRef.current = { provider: stagedProvider, voices: stagedVoices, keys: stagedKeys };
     setSaving(true);
     setFailed(false);
-    const credentialProviders: TtsProvider[] = [];
+    const credentialProviders: SpeechProvider[] = [];
     try {
       // Credentials must land before a setting can select a profile that needs
       // one. Keep every draft until the whole ordered transaction succeeds.
-      for (const provider of TTS_PROVIDERS) {
+      for (const provider of SPEECH_PROVIDERS) {
         const value = (stagedKeys[provider] ?? "").trim();
         if (!value) continue;
         await saveCredential(api, value, credentialRefFor(provider));
         credentialProviders.push(provider);
       }
 
-      for (const provider of TTS_PROVIDERS) {
+      for (const provider of SPEECH_PROVIDERS) {
         const draft = stagedVoices[provider];
         const field = voiceFieldFor(provider);
         if (draft === undefined) continue;
@@ -398,7 +398,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
       : undefined;
 
   const credentialField = (
-    provider: TtsProvider,
+    provider: SpeechProvider,
     label: string,
     hint: string,
     id = `${cardId}-${provider}-key`

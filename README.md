@@ -1,97 +1,148 @@
-# kepos-tts
+# Kepos Speech
 
-Dual-provider Chinese tagged text-to-speech for DeepSeek Harness Web. The bundle
-adds one optional audio-only `[[tts:text]]...[[/tts:text]]` block to a finalized
-assistant reply. When that message completes, it immediately prepares its MP3
-and replaces the block with the browser's native audio player. Normal replies,
-malformed tags, and fenced examples remain ordinary visible text. Its temporary
-Host service also exposes bounded, non-real-time Qwen speech recognition for
-trusted in-process callers; Matrix and Companion callers are future work.
+`@lamplitisles/kepos-speech` is a DeepSeek Harness Web plugin for Chinese
+speech synthesis and short-audio recognition. It adds one optional audio-only
+`[[tts:text]]...[[/tts:text]]` block to a finalized assistant reply, prepares
+the resulting MP3, and replaces the block with the browser's native audio
+player. The Host service also exposes bounded, synchronous Qwen ASR to trusted
+in-process callers.
 
-## Build and verify
+Source: <https://github.com/LamplitIsles/kepos-speech>.
+
+## Install for DSH
 
 ```sh
-bun install
-bun run typecheck
-bun run test
-bun run build
-bun run pack-smoke
+dsh plugin --profile <profile> add @lamplitisles/kepos-speech
 ```
 
-The resulting package contains a host ESM entry, a browser loader entry, and
-`cordis.patch.yml`. It is pinned to the DSH `0.1.2-alpha.3` contract family.
-The packed smoke test requires a `dsh` CLI reporting that exact version; set
-`DSH_CLI` when it is not the default executable on `PATH`.
+The package is pinned to the DSH `0.1.2-alpha.3` contract family and contains
+the Host entry, browser loader, and `cordis.patch.yml` bundle patch.
 
-## Settings
+## Settings and providers
 
-Open the native Plugin Settings card from a local loopback DSH Web session and
-choose Alibaba or ByteDance. The editable Voice ID defaults are `Maia` and
-`zh_female_sajiaoxuemei_uranus_bigtts`; any provider-supported ID up to 128
-characters can be entered. The DashScope key is always available in the card,
-including while ByteDance is selected, and is labelled as shared by Alibaba TTS
-and Qwen speech recognition. The Volcengine key appears only for ByteDance TTS.
-The provider selector controls TTS output only; Qwen ASR is the sole STT path and
-has no provider selector.
-Both fields are write-only. DSH credentials hold DashScope under
-`KEPOS_TTS_DASHSCOPE_API_KEY` and Volcengine under
-`KEPOS_TTS_VOLCENGINE_API_KEY`; this plugin never reads or displays saved
-values. There is no agenix or remote configuration path. In remote DSH Web, an
-unavailable or memory-backed Settings scope does not render this card; only a
-ready non-writable Host scope shows it read-only.
+Open the native **Kepos Speech** Plugin Settings card from a local loopback
+DSH Web session and choose Alibaba or ByteDance for tagged TTS output. The
+editable Voice IDs default to `Maia` and
+`zh_female_sajiaoxuemei_uranus_bigtts`; provider-supported IDs up to 128
+characters are accepted. The DashScope key is shared by Alibaba TTS and the
+fixed Qwen ASR path. The Volcengine key is used only for ByteDance TTS. Both
+credential fields are write-only and are stored by DSH as
+`KEPOS_SPEECH_DASHSCOPE_API_KEY` and `KEPOS_SPEECH_VOLCENGINE_API_KEY`.
 
-Alibaba uses Qwen3-TTS Flash with Chinese MP3 output. ByteDance uses the
-domestic Volcengine V3 `seed-tts-2.0` one-shot SSE endpoint with MP3 at 24
-kHz. The host accepts only the finalized passage and framework session identity
-sent by the browser's trusted Connection RPC; provider and voice are never
-message overrides.
+The provider selector controls TTS output only. Qwen ASR is the sole
+recognition provider and accepts one non-empty supported audio attachment up to
+the documented 10 MB encoded bound. It returns complete text and optional
+audio-level language and speech-expression annotations; it does not persist
+audio or transcript content.
 
 ## Optional Host service
 
-When this plugin is mounted, it publishes the optional Cordis service
-`ctx.get("keposTts")`. A Host plugin can call the exported
-`KeposTtsService` contract:
+When mounted, the plugin publishes the optional Cordis service
+`ctx.get("keposSpeech")`. A Host plugin can consume the exported
+`KeposSpeechService` contract:
 
 ```ts
-const tts = ctx.get("keposTts");
-if (tts) {
-  const audio = await tts.synthesize({ sessionId, text }, signal);
+const speech = ctx.get("keposSpeech");
+if (speech) {
+  const audio = await speech.synthesize({ sessionId, text }, signal);
   // audio.mediaType === "audio/mpeg"; audio.data is bounded MP3 bytes
 
-  const transcript = await tts.transcribe({
+  const transcript = await speech.transcribe({
     sessionId,
     mediaType: "audio/ogg",
     data: attachmentBytes,
-    language: "zh" // optional recognition hint
+    language: "zh"
   }, signal);
-  // transcript.text plus optional audio-level language/expression annotations
+  // transcript.text plus optional language/expression annotations
 }
 ```
 
-The service validates the live session and text, resolves the configured
-provider and credential, and shares the workspace cache with browser TTS. Its
-`transcribe` operation validates a non-empty supported audio attachment whose
-Base64 Data URL is no larger than 10 MB, resolves the same DashScope key, and
-calls the fixed `qwen3-asr-flash` model synchronously with that private Data
-URL. DashScope enforces the corresponding five-minute duration limit; Kepos
-does not decode arbitrary containers to estimate duration. The documented
-response contains complete text plus optional audio-level detected language
-and a discrete speech-expression label; this synchronous model does not
-provide sentence timestamps. That label is a model classification of speech
-expression, not a fact about the speaker's inner state; callers should combine
-it with transcript and conversation context. The service never persists audio,
-transcript content, raw provider JSON, or credentials. It is optional and
-disappears with the Kepos plugin fiber. This is an in-process Host seam for
-non-browser consumers, not a public transcription route and not a replacement
-for the authenticated browser RPC.
+The service validates the live session and shares the workspace cache with
+browser TTS. It is optional, is removed with the plugin lifecycle, and is not a
+public transcription or synthesis route. Browser synthesis uses the
+authenticated `/kepos-speech/synthesize` RPC and same-origin
+`/kepos-speech/audio/...` artifacts.
 
 ## Audio cache
 
-Each prepared passage is keyed by its normalized text, selected provider
-profile (provider, model/resource, and Voice ID), and cache format, then written
-atomically as
-`.dsh/kepos-tts/audio/<sha256>.mp3` below the active session workspace. A
-refresh or remount resolves the session again and reuses that bounded artifact;
-the browser only receives a same-origin `/kepos-tts/audio/...` URL. The cache
-has no browsing, eviction, migration, or clear UI, and sessions without an
-absolute workspace are intentionally unavailable.
+Each prepared passage is keyed by normalized text, provider profile, and cache
+format, then written atomically as
+`.dsh/kepos-speech/audio/<sha256>.mp3` below the active session workspace. A
+refresh or remount resolves the session again and reuses the bounded artifact;
+there is no browsing, migration, eviction, or cache-management UI.
+
+## Maintainer release setup
+
+The tag-only workflow in `.github/workflows/release.yml` verifies the exact
+package that it publishes. Before the first automated release, a maintainer
+must bootstrap a distinct prerelease version, then prepare the first stable
+version:
+
+1. Create or confirm the `@lamplitisles` npm scope and manually publish the
+   initial `@lamplitisles/kepos-speech@0.1.0-beta.0` package so the package
+   identity exists. Set `package.json` to `0.1.0-beta.0`, run the bootstrap checks
+   below from a maintainer workstation, and publish with local npm
+   authentication:
+
+   ```sh
+   bun install --frozen-lockfile
+   bun run typecheck
+   bun run test
+   bun run build
+   GITHUB_REF_NAME=v0.1.0-beta.0 bun run release:check
+   npm publish --access public --tag beta
+   ```
+
+   This prerelease is deliberately distinct from the later stable `0.1.0`;
+   do not manually publish `0.1.0`.
+2. Change `package.json` to version `0.1.0` and commit that change, then
+   configure npm Trusted Publishing for
+   `@lamplitisles/kepos-speech`, repository
+   `LamplitIsles/kepos-speech`, workflow
+   `.github/workflows/release.yml`, and the GitHub `npm` environment.
+3. Create the protected GitHub `npm` environment with the required approval
+   policy.
+
+For the first stable trusted publish, rerun the checks with the stable version,
+push the committed version change, and create the tag with the supported `og`
+operation (`og tag --help` describes this as “Create and push a tag”):
+
+```sh
+bun install --frozen-lockfile
+bun run typecheck
+bun run test
+bun run build
+GITHUB_REF_NAME=v0.1.0 bun run release:check
+og push
+og tag v0.1.0
+```
+
+For each subsequent release, update `package.json` to the intended version,
+run the local checks, push the committed change with `og push`, and create its
+semantic version tag with `og tag v<version>` (for example, `og tag
+v0.2.0-beta.1`). Tags must be `v<semver>` (for example `v0.1.0` or
+`v0.2.0-beta.1`). Every purely numeric prerelease segment must be `0` or a
+non-zero number without leading zeroes: `v1.2.3-0` and `v1.2.3-alpha01` are
+valid, while `v1.2.3-01`, `v1.2.3-0.01`, and `v1.2.3-alpha.01` are rejected.
+Build metadata such as `v1.2.3+build.1` is accepted. Stable tags publish to
+npm as `latest`; prerelease tags publish as `beta`. The verify job performs an
+immutable install, typecheck, tests, build, packed-artifact validation, and the
+disposable DSH package smoke check before uploading the tarball consumed by the
+publish job. Publishing uses npm OIDC provenance in the protected `npm`
+environment with `id-token: write`; no npm token or repository secret is
+configured or required for automated releases. The one-time bootstrap
+publication uses the maintainer's local npm authentication only.
+
+## Development
+
+```sh
+bun install --frozen-lockfile
+bun run typecheck
+bun run test
+bun run build
+GITHUB_REF_NAME=v0.1.0 bun run release:check
+bun run pack-smoke
+```
+
+The smoke test uses test-owned temporary directories and never modifies a live
+DSH profile, credential, or production service.

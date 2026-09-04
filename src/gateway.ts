@@ -12,27 +12,27 @@ import {
   QWEN_ASR_LANGUAGES,
   QWEN_ASR_MEDIA_TYPES,
   QWEN_ASR_MODEL,
-  TTS_MAX_CHARS,
+  SPEECH_MAX_CHARS,
   profileFromSettings,
   type QwenAsrExpression,
   type QwenAsrLanguage,
-  type TtsProfile
+  type SpeechProfile
 } from "./constants.js";
-import { normalizeTtsText } from "./parser.js";
+import { normalizeSpeechText } from "./parser.js";
 import {
   AUDIO_ROUTE_PATH,
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
-  TTS_CACHE_DIRECTORY,
+  SPEECH_CACHE_DIRECTORY,
   audioArtifactPath,
   audioCacheDirectory,
   audioUrl,
   cacheDigest,
   readAudioArtifact,
   readAudioArtifactMetadata,
-  registerTtsAudioRoute,
+  registerSpeechAudioRoute,
   resolveSessionWorkspace,
-  serveTtsAudio,
+  serveSpeechAudio,
   writeAudioArtifactAtomic,
   type AudioRouteRegistrar,
   type AudioResponse,
@@ -40,7 +40,7 @@ import {
 } from "./audio-cache.js";
 import { RPC_CHANNEL, RPC_ENDPOINT, type BrowserAudioPayload } from "./rpc.js";
 
-export type TtsFailureCategory =
+export type SpeechFailureCategory =
   | "invalid-input"
   | "unavailable"
   | "provider-rejected"
@@ -49,9 +49,9 @@ export type TtsFailureCategory =
   | "internal"
   | "cancelled";
 
-export interface TtsFailureDiagnostic {
-  category: TtsFailureCategory;
-  provider?: TtsProfile["provider"];
+export interface SpeechFailureDiagnostic {
+  category: SpeechFailureCategory;
+  provider?: SpeechProfile["provider"];
   voice?: string;
   stage?: "session" | "credential" | "network" | "http" | "provider-response";
   httpStatus?: number;
@@ -61,20 +61,20 @@ export interface TtsFailureDiagnostic {
   responseIssue?: "read-failed" | "invalid-json" | "invalid-frame" | "no-data-frames" | "invalid-transcription";
 }
 
-/** Stable input accepted by the optional Host-facing `keposTts` service. */
-export interface KeposTtsSynthesisRequest {
+/** Stable input accepted by the optional Host-facing `keposSpeech` service. */
+export interface KeposSpeechSynthesisRequest {
   sessionId: string;
   text: string;
 }
 
-/** Bounded MP3 payload returned by the optional Host-facing `keposTts` service. */
-export interface KeposTtsAudio {
+/** Bounded MP3 payload returned by the optional Host-facing `keposSpeech` service. */
+export interface KeposSpeechAudio {
   mediaType: "audio/mpeg";
   data: Uint8Array;
 }
 
 /** A short audio attachment accepted by the Host-only Qwen ASR operation. */
-export interface KeposTtsTranscriptionRequest {
+export interface KeposSpeechTranscriptionRequest {
   sessionId: string;
   mediaType: string;
   data: Uint8Array;
@@ -83,7 +83,7 @@ export interface KeposTtsTranscriptionRequest {
 }
 
 /** Provider-neutral Qwen ASR result returned to a trusted Host caller. */
-export interface KeposTtsTranscription {
+export interface KeposSpeechTranscription {
   text: string;
   /** Audio-level language annotation from the model, when present. */
   language?: QwenAsrLanguage;
@@ -92,18 +92,18 @@ export interface KeposTtsTranscription {
 }
 
 /** Optional in-process Host capability offered while the Kepos plugin is mounted. */
-export interface KeposTtsService {
-  synthesize(request: KeposTtsSynthesisRequest, signal?: AbortSignal): Promise<KeposTtsAudio>;
-  transcribe(request: KeposTtsTranscriptionRequest, signal?: AbortSignal): Promise<KeposTtsTranscription>;
+export interface KeposSpeechService {
+  synthesize(request: KeposSpeechSynthesisRequest, signal?: AbortSignal): Promise<KeposSpeechAudio>;
+  transcribe(request: KeposSpeechTranscriptionRequest, signal?: AbortSignal): Promise<KeposSpeechTranscription>;
 }
 
-/** Cordis key for the optional Host TTS capability. */
-export const KEPOS_TTS_SERVICE = "keposTts" as const;
+/** Cordis key for the optional Host Speech capability. */
+export const KEPOS_SPEECH_SERVICE = "keposSpeech" as const;
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
-    /** Optional Host TTS capability supplied by Kepos TTS when mounted. */
-    keposTts: KeposTtsService;
+    /** Optional Host Speech capability supplied by Kepos Speech when mounted. */
+    keposSpeech: KeposSpeechService;
   }
 }
 
@@ -113,16 +113,16 @@ export {
   AUDIO_ROUTE_PATH,
   CACHE_FORMAT_VERSION,
   MAX_AUDIO_BYTES,
-  TTS_CACHE_DIRECTORY,
+  SPEECH_CACHE_DIRECTORY,
   audioArtifactPath,
   audioCacheDirectory,
   audioUrl,
   cacheDigest,
   readAudioArtifact,
   readAudioArtifactMetadata,
-  registerTtsAudioRoute,
+  registerSpeechAudioRoute,
   resolveSessionWorkspace,
-  serveTtsAudio,
+  serveSpeechAudio,
   writeAudioArtifactAtomic
 } from "./audio-cache.js";
 export type { AudioRouteRegistrar, AudioResponse, SessionResolver } from "./audio-cache.js";
@@ -131,29 +131,29 @@ export interface CredentialResolver {
   resolve(ref: ReturnType<typeof credentialRef>): Promise<ResolvedCredential | undefined>;
 }
 
-export interface TtsGatewayOptions {
+export interface SpeechGatewayOptions {
   credentials: CredentialResolver | Pick<CredentialProvider, "resolve">;
   sessions: SessionResolver;
   /** Normalized settings are resolved for each admitted cache miss. */
   getSettings: () => unknown;
   fetch?: typeof fetch;
-  onFailure?: (failure: TtsFailureDiagnostic) => void;
+  onFailure?: (failure: SpeechFailureDiagnostic) => void;
 }
 
-export class TtsGatewayError extends Error {
-  readonly category: TtsFailureCategory;
-  readonly diagnostic: Omit<TtsFailureDiagnostic, "category">;
+export class SpeechGatewayError extends Error {
+  readonly category: SpeechFailureCategory;
+  readonly diagnostic: Omit<SpeechFailureDiagnostic, "category">;
 
-  constructor(category: TtsFailureCategory, diagnostic: Omit<TtsFailureDiagnostic, "category"> = {}) {
+  constructor(category: SpeechFailureCategory, diagnostic: Omit<SpeechFailureDiagnostic, "category"> = {}) {
     super(category);
-    this.name = "TtsGatewayError";
+    this.name = "SpeechGatewayError";
     this.category = category;
     this.diagnostic = diagnostic;
   }
 }
 
-function reportGatewayFailure(error: unknown, onFailure?: (failure: TtsFailureDiagnostic) => void): TtsGatewayError {
-  const typed = error instanceof TtsGatewayError ? error : new TtsGatewayError("internal");
+function reportGatewayFailure(error: unknown, onFailure?: (failure: SpeechFailureDiagnostic) => void): SpeechGatewayError {
+  const typed = error instanceof SpeechGatewayError ? error : new SpeechGatewayError("internal");
   if (typed.category !== "invalid-input" && typed.category !== "cancelled") {
     try {
       onFailure?.({ category: typed.category, ...typed.diagnostic });
@@ -165,14 +165,14 @@ function reportGatewayFailure(error: unknown, onFailure?: (failure: TtsFailureDi
 }
 
 function providerDiagnostic(
-  profile: Pick<TtsProfile, "provider" | "voice">,
-  stage: NonNullable<TtsFailureDiagnostic["stage"]>,
-  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
-): Omit<TtsFailureDiagnostic, "category"> {
+  profile: Pick<SpeechProfile, "provider" | "voice">,
+  stage: NonNullable<SpeechFailureDiagnostic["stage"]>,
+  detail: Pick<SpeechFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
+): Omit<SpeechFailureDiagnostic, "category"> {
   return { provider: profile.provider, voice: profile.voice, stage, ...detail };
 }
 
-function failure<T>(category: TtsFailureCategory): ConnectionRpcResult<T> {
+function failure<T>(category: SpeechFailureCategory): ConnectionRpcResult<T> {
   const code = category === "invalid-input" ? "bad-request" : category === "cancelled" ? "cancelled" : "internal";
   if (code === "bad-request") {
     return {
@@ -227,7 +227,7 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
   return bytes;
 }
 
-function responseDiagnostic(response: Response, responseBytes?: number): Pick<TtsFailureDiagnostic, "responseContentType" | "responseBytes" | "requestId"> {
+function responseDiagnostic(response: Response, responseBytes?: number): Pick<SpeechFailureDiagnostic, "responseContentType" | "responseBytes" | "requestId"> {
   const responseContentType = response.headers.get("content-type")?.slice(0, 128);
   const requestId = (
     response.headers.get("x-tt-logid")
@@ -244,8 +244,8 @@ function responseDiagnostic(response: Response, responseBytes?: number): Pick<Tt
 
 async function httpProviderRejection(
   response: Response,
-  profile: Pick<TtsProfile, "provider" | "voice">
-): Promise<TtsGatewayError> {
+  profile: Pick<SpeechProfile, "provider" | "voice">
+): Promise<SpeechGatewayError> {
   let responseBytes: number | undefined;
   try {
     const body = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
@@ -253,7 +253,7 @@ async function httpProviderRejection(
   } catch {
     // The HTTP status still provides a safe diagnostic when the body is absent or oversized.
   }
-  return new TtsGatewayError("provider-rejected", providerDiagnostic(profile, "http", {
+  return new SpeechGatewayError("provider-rejected", providerDiagnostic(profile, "http", {
     httpStatus: response.status,
     ...responseDiagnostic(response, responseBytes)
   }));
@@ -311,7 +311,7 @@ interface ParsedTranscriptionRequest {
 
 function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionRequest {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   const record = payload as Record<string, unknown>;
   const keys = Object.keys(record);
@@ -322,17 +322,17 @@ function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionR
     || !keys.includes("mediaType")
     || !keys.includes("data")
   ) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   if (typeof record.sessionId !== "string" || !record.sessionId.trim()) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   if (!(record.data instanceof Uint8Array) || record.data.byteLength === 0) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
 
   if (typeof record.mediaType !== "string" || record.mediaType.length > 256) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   const mediaType = record.mediaType.trim().toLowerCase();
   const baseMediaType = mediaType.split(";", 1)[0]?.trim();
@@ -342,18 +342,18 @@ function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionR
     || !/^audio\/[a-z0-9][a-z0-9.+-]*$/u.test(baseMediaType)
     || !/^audio\/[a-z0-9][a-z0-9.+-]*(?:\s*;\s*[a-z0-9!#$&^_.+-]+=[a-z0-9!#$&^_.+-]+)*$/u.test(mediaType)
   ) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   if (dataUrlLength(mediaType, record.data.byteLength) > MAX_ASR_DATA_URL_BYTES) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
 
   const languageValue = record.language;
   let language: QwenAsrLanguage | undefined;
   if (languageValue !== undefined) {
-    if (typeof languageValue !== "string") throw new TtsGatewayError("invalid-input");
+    if (typeof languageValue !== "string") throw new SpeechGatewayError("invalid-input");
     const normalized = languageValue.trim().toLowerCase();
-    if (!QWEN_ASR_LANGUAGES.includes(normalized as QwenAsrLanguage)) throw new TtsGatewayError("invalid-input");
+    if (!QWEN_ASR_LANGUAGES.includes(normalized as QwenAsrLanguage)) throw new SpeechGatewayError("invalid-input");
     language = normalized as QwenAsrLanguage;
   }
   return {
@@ -410,7 +410,7 @@ function syncAnnotations(value: unknown): { language?: QwenAsrLanguage; expressi
 }
 
 /** Normalize the bounded provider body and discard provider-specific fields. */
-export function normalizeQwenAsrResponse(body: unknown): KeposTtsTranscription {
+export function normalizeQwenAsrResponse(body: unknown): KeposSpeechTranscription {
   if (!isRecord(body)) throw new Error("invalid-transcription");
   const output = isRecord(body.output) ? body.output : undefined;
   const choices = output && Array.isArray(output.choices) ? output.choices : undefined;
@@ -426,20 +426,20 @@ export function normalizeQwenAsrResponse(body: unknown): KeposTtsTranscription {
   };
 }
 
-function requestFromPayload(payload: unknown): KeposTtsSynthesisRequest {
+function requestFromPayload(payload: unknown): KeposSpeechSynthesisRequest {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   const record = payload as { text?: unknown; sessionId?: unknown };
   const keys = Object.keys(payload);
   if (keys.some((key) => key !== "text" && key !== "sessionId") || !keys.includes("text") || !keys.includes("sessionId")) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
   if (typeof record.text !== "string" || typeof record.sessionId !== "string" || !record.sessionId.trim()) {
-    throw new TtsGatewayError("invalid-input");
+    throw new SpeechGatewayError("invalid-input");
   }
-  const text = normalizeTtsText(record.text);
-  if (!text || Array.from(text).length > TTS_MAX_CHARS) throw new TtsGatewayError("invalid-input");
+  const text = normalizeSpeechText(record.text);
+  if (!text || Array.from(text).length > SPEECH_MAX_CHARS) throw new SpeechGatewayError("invalid-input");
   return { text, sessionId: record.sessionId };
 }
 
@@ -479,7 +479,7 @@ async function alibabaBytes(
       })
     });
   } catch {
-    throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "alibaba", voice }, "network"));
+    throw new SpeechGatewayError("provider-rejected", providerDiagnostic({ provider: "alibaba", voice }, "network"));
   }
   if (!response.ok) throw await httpProviderRejection(response, { provider: "alibaba", voice });
 
@@ -490,10 +490,10 @@ async function alibabaBytes(
     responseMeta = responseDiagnostic(response, encoded.byteLength);
     body = JSON.parse(new TextDecoder().decode(encoded));
   } catch {
-    throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
+    throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
   }
   const audio = providerAudio(body);
-  if (!audio) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
+  if (!audio) throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response", responseMeta));
   let bytes: Uint8Array | undefined;
   if (audio.data) bytes = base64ToBytes(audio.data);
   if ((!bytes || bytes.length === 0) && audio.url) {
@@ -506,11 +506,11 @@ async function alibabaBytes(
       if (contentType && !contentType.startsWith("audio/") && contentType !== "application/octet-stream") throw new Error("content-type");
       bytes = await readBoundedResponse(audioResponse, MAX_AUDIO_BYTES);
     } catch {
-      throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
+      throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
     }
   }
   if (!bytes || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) {
-    throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
+    throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "alibaba", voice }, "provider-response"));
   }
   return bytes;
 }
@@ -520,7 +520,7 @@ interface ByteDanceFrame {
   data?: string;
 }
 
-type ByteDanceResponseIssue = NonNullable<TtsFailureDiagnostic["responseIssue"]>;
+type ByteDanceResponseIssue = NonNullable<SpeechFailureDiagnostic["responseIssue"]>;
 type ByteDanceFrameResult =
   | { ok: true; frames: ByteDanceFrame[] }
   | { ok: false; issue: Exclude<ByteDanceResponseIssue, "read-failed"> };
@@ -584,7 +584,7 @@ async function bytedanceBytes(
         "X-Api-Resource-Id": BYTEDANCE_RESOURCE_ID
       },
       body: JSON.stringify({
-        user: { uid: "kepos-tts" },
+        user: { uid: "kepos-speech" },
         req_params: {
           text,
           speaker: voice,
@@ -593,7 +593,7 @@ async function bytedanceBytes(
       })
     });
   } catch {
-    throw new TtsGatewayError("provider-rejected", providerDiagnostic({ provider: "bytedance", voice }, "network"));
+    throw new SpeechGatewayError("provider-rejected", providerDiagnostic({ provider: "bytedance", voice }, "network"));
   }
   if (!response.ok) throw await httpProviderRejection(response, { provider: "bytedance", voice });
 
@@ -606,7 +606,7 @@ async function bytedanceBytes(
   } catch {
     parsed = { ok: false, issue: "read-failed" };
   }
-  if (!parsed.ok) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic(
+  if (!parsed.ok) throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic(
     { provider: "bytedance", voice },
     "provider-response",
     { ...responseMeta, responseIssue: parsed.issue }
@@ -619,7 +619,7 @@ async function bytedanceBytes(
       if (frame.data !== undefined) {
         const bytes = base64ToBytes(frame.data);
         if (!bytes || total + bytes.length > MAX_AUDIO_BYTES) {
-          throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
+          throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
         }
         if (bytes.length > 0) {
           chunks.push(bytes);
@@ -629,13 +629,13 @@ async function bytedanceBytes(
       continue;
     }
     if (frame.code === 20_000_000) continue;
-    throw new TtsGatewayError("provider-rejected", providerDiagnostic(
+    throw new SpeechGatewayError("provider-rejected", providerDiagnostic(
       { provider: "bytedance", voice },
       "provider-response",
       responseMeta
     ));
   }
-  if (total === 0) throw new TtsGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
+  if (total === 0) throw new SpeechGatewayError("provider-invalid-audio", providerDiagnostic({ provider: "bytedance", voice }, "provider-response", responseMeta));
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -649,7 +649,7 @@ async function providerBytes(
   fetchImpl: typeof fetch,
   credential: ResolvedCredential,
   text: string,
-  profile: TtsProfile
+  profile: SpeechProfile
 ): Promise<Uint8Array> {
   return profile.provider === "bytedance"
     ? bytedanceBytes(fetchImpl, credential, text, profile.voice)
@@ -659,9 +659,9 @@ async function providerBytes(
 const ASR_DIAGNOSTIC_PROFILE = { provider: "alibaba" as const, voice: QWEN_ASR_MODEL };
 
 function asrDiagnostic(
-  stage: NonNullable<TtsFailureDiagnostic["stage"]>,
-  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
-): Omit<TtsFailureDiagnostic, "category"> {
+  stage: NonNullable<SpeechFailureDiagnostic["stage"]>,
+  detail: Pick<SpeechFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
+): Omit<SpeechFailureDiagnostic, "category"> {
   return providerDiagnostic(ASR_DIAGNOSTIC_PROFILE, stage, detail);
 }
 
@@ -670,11 +670,11 @@ async function qwenAsrTranscription(
   credential: ResolvedCredential,
   request: ParsedTranscriptionRequest,
   signal?: AbortSignal
-): Promise<KeposTtsTranscription> {
-  if (signal?.aborted) throw new TtsGatewayError("cancelled");
+): Promise<KeposSpeechTranscription> {
+  if (signal?.aborted) throw new SpeechGatewayError("cancelled");
   const encoded = bytesToBase64(request.data);
   const dataUrl = `data:${request.mediaType};base64,${encoded}`;
-  if (dataUrl.length > MAX_ASR_DATA_URL_BYTES) throw new TtsGatewayError("invalid-input");
+  if (dataUrl.length > MAX_ASR_DATA_URL_BYTES) throw new SpeechGatewayError("invalid-input");
   const asrOptions = {
     enable_itn: true,
     ...(request.language === undefined ? {} : { language: request.language })
@@ -702,23 +702,23 @@ async function qwenAsrTranscription(
     });
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
-      throw new TtsGatewayError("cancelled");
+      throw new SpeechGatewayError("cancelled");
     }
-    throw new TtsGatewayError("provider-rejected", asrDiagnostic("network"));
+    throw new SpeechGatewayError("provider-rejected", asrDiagnostic("network"));
   }
-  if (signal?.aborted) throw new TtsGatewayError("cancelled");
+  if (signal?.aborted) throw new SpeechGatewayError("cancelled");
   if (!response.ok) throw await httpProviderRejection(response, ASR_DIAGNOSTIC_PROFILE);
 
   let encodedResponse: Uint8Array;
   let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
   try {
     encodedResponse = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
-    if (signal?.aborted) throw new TtsGatewayError("cancelled");
+    if (signal?.aborted) throw new SpeechGatewayError("cancelled");
     responseMeta = responseDiagnostic(response, encodedResponse.byteLength);
   } catch (error) {
-    if (error instanceof TtsGatewayError) throw error;
-    if (signal?.aborted) throw new TtsGatewayError("cancelled");
-    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+    if (error instanceof SpeechGatewayError) throw error;
+    if (signal?.aborted) throw new SpeechGatewayError("cancelled");
+    throw new SpeechGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
       ...responseMeta,
       responseIssue: "read-failed"
     }));
@@ -728,7 +728,7 @@ async function qwenAsrTranscription(
   try {
     body = JSON.parse(new TextDecoder().decode(encodedResponse));
   } catch {
-    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+    throw new SpeechGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
       ...responseMeta,
       responseIssue: "invalid-json"
     }));
@@ -736,7 +736,7 @@ async function qwenAsrTranscription(
   try {
     return normalizeQwenAsrResponse(body);
   } catch {
-    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+    throw new SpeechGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
       ...responseMeta,
       responseIssue: "invalid-transcription"
     }));
@@ -746,26 +746,26 @@ async function qwenAsrTranscription(
 /** Shared in-flight work survives individual gateway instances and renderer disposal. */
 const inFlight = new Map<string, Promise<number>>();
 
-export class TtsGateway {
+export class SpeechGateway {
   private readonly fetchImpl: typeof fetch;
 
-  constructor(private readonly options: TtsGatewayOptions) {
+  constructor(private readonly options: SpeechGatewayOptions) {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private async generateAndCache(path: string, text: string, profile: TtsProfile): Promise<number> {
+  private async generateAndCache(path: string, text: string, profile: SpeechProfile): Promise<number> {
     // This disk check wins a race with another process that published the same
     // deterministic artifact while this request was being scheduled.
     const existing = await readAudioArtifactMetadata(path, MAX_AUDIO_BYTES);
     if (existing) return existing.size;
     const credential = await this.options.credentials.resolve(credentialRef(profile.credentialRef));
-    if (!credential?.value) throw new TtsGatewayError("unavailable", providerDiagnostic(profile, "credential"));
+    if (!credential?.value) throw new SpeechGatewayError("unavailable", providerDiagnostic(profile, "credential"));
     const bytes = await providerBytes(this.fetchImpl, credential, text, profile);
     await writeAudioArtifactAtomic(path, bytes, MAX_AUDIO_BYTES);
     return bytes.byteLength;
   }
 
-  private async artifact(path: string, text: string, profile: TtsProfile): Promise<number> {
+  private async artifact(path: string, text: string, profile: SpeechProfile): Promise<number> {
     const pending = inFlight.get(path);
     if (pending) return pending;
     // Keep the in-flight entry from the initial disk lookup onward. This
@@ -785,17 +785,17 @@ export class TtsGateway {
   }
 
   private async resolveArtifact(payload: unknown, signal?: AbortSignal): Promise<{
-    request: KeposTtsSynthesisRequest;
+    request: KeposSpeechSynthesisRequest;
     digest: string;
     path: string;
     size: number;
   }> {
-    if (signal?.aborted) throw new TtsGatewayError("cancelled");
+    if (signal?.aborted) throw new SpeechGatewayError("cancelled");
     const request = requestFromPayload(payload);
     const settings = this.options.getSettings();
     const profile = profileFromSettings(settings);
     const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
-    if (!workspace) throw new TtsGatewayError("unavailable", providerDiagnostic(profile, "session"));
+    if (!workspace) throw new SpeechGatewayError("unavailable", providerDiagnostic(profile, "session"));
     const digest = cacheDigest(request.text, settings, CACHE_FORMAT_VERSION);
     const path = audioArtifactPath(workspace, digest);
     // The provider request intentionally does not receive the caller signal:
@@ -818,33 +818,33 @@ export class TtsGateway {
    * value deliberately contains bytes only; browser URLs and cache paths stay
    * behind the Kepos-owned browser and filesystem seams.
    */
-  async synthesizeBytes(payload: unknown, signal?: AbortSignal): Promise<KeposTtsAudio> {
+  async synthesizeBytes(payload: unknown, signal?: AbortSignal): Promise<KeposSpeechAudio> {
     try {
       const { path } = await this.resolveArtifact(payload, signal);
       const data = await readAudioArtifact(path, MAX_AUDIO_BYTES);
-      if (!data) throw new TtsGatewayError("internal");
+      if (!data) throw new SpeechGatewayError("internal");
       return { mediaType: "audio/mpeg", data };
     } catch (error) {
-      if (error instanceof TtsGatewayError) throw error;
-      throw new TtsGatewayError("internal");
+      if (error instanceof SpeechGatewayError) throw error;
+      throw new SpeechGatewayError("internal");
     }
   }
 
   /**
    * Recognize one short voice attachment for a trusted Host consumer. The
-   * operation deliberately bypasses TTS provider selection: DashScope is the
+   * operation deliberately bypasses speech provider selection: DashScope is the
    * sole ASR provider and always uses the shared Alibaba credential.
    */
-  async transcribe(payload: unknown, signal?: AbortSignal): Promise<KeposTtsTranscription> {
+  async transcribe(payload: unknown, signal?: AbortSignal): Promise<KeposSpeechTranscription> {
     try {
-      if (signal?.aborted) throw new TtsGatewayError("cancelled");
+      if (signal?.aborted) throw new SpeechGatewayError("cancelled");
       const request = transcriptionRequestFromPayload(payload);
       const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
-      if (!workspace) throw new TtsGatewayError("unavailable", asrDiagnostic("session"));
+      if (!workspace) throw new SpeechGatewayError("unavailable", asrDiagnostic("session"));
       // Resolve this for every admitted call; credentials are intentionally not
-      // cached and the selected TTS provider never changes this reference.
+      // cached and the selected speech provider never changes this reference.
       const credential = await this.options.credentials.resolve(credentialRef(ALIBABA_CREDENTIAL_REF));
-      if (!credential?.value) throw new TtsGatewayError("unavailable", asrDiagnostic("credential"));
+      if (!credential?.value) throw new SpeechGatewayError("unavailable", asrDiagnostic("credential"));
       return await qwenAsrTranscription(this.fetchImpl, credential, request, signal);
     } catch (error) {
       throw reportGatewayFailure(error, this.options.onFailure);
@@ -861,21 +861,21 @@ export class TtsGateway {
   }
 }
 
-export function createTtsRpcHandler(gateway: TtsGateway): ConnectionRpcHandler {
+export function createSpeechRpcHandler(gateway: SpeechGateway): ConnectionRpcHandler {
   return (endpoint, payload, signal) => gateway.handle(endpoint, payload, signal);
 }
 
 /** Build the optional Cordis Host service from the shared gateway. */
-export function createKeposTtsService(gateway: TtsGateway): KeposTtsService {
+export function createKeposSpeechService(gateway: SpeechGateway): KeposSpeechService {
   return {
     synthesize: (request, signal) => gateway.synthesizeBytes(request, signal),
     transcribe: (request, signal) => gateway.transcribe(request, signal)
   };
 }
 
-export function registerTtsRpc(
+export function registerSpeechRpc(
   connection: Pick<HostConnectionRpc, "handle">,
-  gateway: TtsGateway
+  gateway: SpeechGateway
 ): () => Promise<void> {
-  return connection.handle(RPC_CHANNEL, createTtsRpcHandler(gateway));
+  return connection.handle(RPC_CHANNEL, createSpeechRpcHandler(gateway));
 }

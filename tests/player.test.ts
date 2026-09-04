@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import { act, create } from "react-test-renderer";
 import { createElement } from "react";
 
-import { TtsAudioPlayer, TtsPlayer, clearTtsPreparationCache } from "../src/player.js";
+import { SpeechAudioPlayer, SpeechPlayer, clearSpeechPreparationCache } from "../src/player.js";
 import type { BrowserAudioPayload } from "../src/gateway.js";
 
-const payload: BrowserAudioPayload = { mediaType: "audio/mpeg", url: "/kepos-tts/audio/a.mp3?sessionId=session-a", bytes: 3 };
+const payload: BrowserAudioPayload = { mediaType: "audio/mpeg", url: "/kepos-speech/audio/a.mp3?sessionId=session-a", bytes: 3 };
 
-describe("tagged TTS player", () => {
+describe("tagged Speech player", () => {
   it("prefetches audio when the finalized message mounts and renders a native player", async () => {
     let calls = 0;
     let root: ReturnType<typeof create> | undefined;
     const client = { synthesize: async (_text: string, sessionId: string) => { calls += 1; expect(sessionId).toBe("session-a"); return payload; } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, {
+      root = create(createElement(SpeechAudioPlayer, {
         text: "你好",
         transcript: "你好",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
@@ -43,9 +43,9 @@ describe("tagged TTS player", () => {
         return payload;
       }
     };
-    clearTtsPreparationCache(client);
-    const one = new TtsPlayer(client);
-    const two = new TtsPlayer(client);
+    clearSpeechPreparationCache(client);
+    const one = new SpeechPlayer(client);
+    const two = new SpeechPlayer(client);
     const first = one.prepare("  你好\n", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     const second = two.prepare("你好", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     await Promise.resolve();
@@ -62,9 +62,9 @@ describe("tagged TTS player", () => {
   it("keeps page preparation separate for different provider profiles", async () => {
     let calls = 0;
     const client = { synthesize: async () => { calls += 1; return payload; } };
-    clearTtsPreparationCache(client);
-    const alibaba = new TtsPlayer(client);
-    const bytedance = new TtsPlayer(client);
+    clearSpeechPreparationCache(client);
+    const alibaba = new SpeechPlayer(client);
+    const bytedance = new SpeechPlayer(client);
     await Promise.all([
       alibaba.prepare("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a"),
       bytedance.prepare("同一句", '["bytedance","seed-tts-2.0","voice"]', "session-a")
@@ -75,7 +75,7 @@ describe("tagged TTS player", () => {
     alibaba.dispose();
     bytedance.dispose();
 
-    const remountedAlibaba = new TtsPlayer(client);
+    const remountedAlibaba = new SpeechPlayer(client);
     await remountedAlibaba.prepare("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a");
     expect(calls).toBe(2);
     expect(remountedAlibaba.preparedUrl("同一句", '["alibaba","qwen3-tts-flash","Maia"]', "session-a")).toBe(payload.url);
@@ -86,14 +86,14 @@ describe("tagged TTS player", () => {
     let settle!: (value: BrowserAudioPayload) => void;
     let calls = 0;
     const client = { synthesize: async () => { calls += 1; return new Promise<BrowserAudioPayload>((resolve) => { settle = resolve; }); } };
-    clearTtsPreparationCache(client);
-    const first = new TtsPlayer(client);
+    clearSpeechPreparationCache(client);
+    const first = new SpeechPlayer(client);
     const pending = first.prepare("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     await new Promise((resolve) => setTimeout(resolve, 0));
     first.dispose();
     settle(payload);
     await pending;
-    const second = new TtsPlayer(client);
+    const second = new SpeechPlayer(client);
     await second.prepare("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(calls).toBe(1);
     expect(second.preparedUrl("稍等", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a")).toBe(payload.url);
@@ -103,10 +103,10 @@ describe("tagged TTS player", () => {
   it("renders a remounted prepared passage as ready on its first frame", async () => {
     let calls = 0;
     const client = { synthesize: async () => { calls += 1; return payload; } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     let first: ReturnType<typeof create> | undefined;
     await act(async () => {
-      first = create(createElement(TtsAudioPlayer, {
+      first = create(createElement(SpeechAudioPlayer, {
         text: "已经准备",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
@@ -119,7 +119,7 @@ describe("tagged TTS player", () => {
 
     let remounted: ReturnType<typeof create> | undefined;
     act(() => {
-      remounted = create(createElement(TtsAudioPlayer, {
+      remounted = create(createElement(SpeechAudioPlayer, {
         text: "已经准备",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",
@@ -135,10 +135,10 @@ describe("tagged TTS player", () => {
   it("does not share page preparation when no ready profile exists", async () => {
     let calls = 0;
     const client = { synthesize: async () => { calls += 1; return payload; } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     let first: ReturnType<typeof create> | undefined;
     await act(async () => {
-      first = create(createElement(TtsAudioPlayer, { text: "远程", sessionId: "session-a", client }));
+      first = create(createElement(SpeechAudioPlayer, { text: "远程", sessionId: "session-a", client }));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -146,7 +146,7 @@ describe("tagged TTS player", () => {
 
     let second: ReturnType<typeof create> | undefined;
     await act(async () => {
-      second = create(createElement(TtsAudioPlayer, { text: "远程", sessionId: "session-a", client }));
+      second = create(createElement(SpeechAudioPlayer, { text: "远程", sessionId: "session-a", client }));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -163,11 +163,11 @@ describe("tagged TTS player", () => {
         return payload;
       }
     };
-    clearTtsPreparationCache(client);
-    const first = new TtsPlayer(client);
+    clearSpeechPreparationCache(client);
+    const first = new SpeechPlayer(client);
     await first.prepare("重试", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(first.getSnapshot().status).toBe("error");
-    const second = new TtsPlayer(client);
+    const second = new SpeechPlayer(client);
     await second.prepare("重试", "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", "session-a");
     expect(calls).toBe(2);
     expect(second.getSnapshot().status).toBe("ready");
@@ -179,15 +179,15 @@ describe("tagged TTS player", () => {
     let calls = 0;
     let root: ReturnType<typeof create> | undefined;
     const client = { synthesize: async () => { calls += 1; return payload; } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a", client }));
+      root = create(createElement(SpeechAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a", client }));
       await Promise.resolve();
       await Promise.resolve();
     });
     const originalSrc = root!.root.findByType("audio").props.src;
     await act(async () => {
-      root!.update(createElement(TtsAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Other\"]", sessionId: "session-a", client }));
+      root!.update(createElement(SpeechAudioPlayer, { text: "同一句", profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Other\"]", sessionId: "session-a", client }));
       await Promise.resolve();
     });
     expect(calls).toBe(1);
@@ -198,9 +198,9 @@ describe("tagged TTS player", () => {
   it("keeps the transcript visible when prefetching fails", async () => {
     let root: ReturnType<typeof create> | undefined;
     const client = { synthesize: async () => { throw new Error("unavailable"); } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, {
+      root = create(createElement(SpeechAudioPlayer, {
         text: "你好",
         transcript: "你好（旁白）",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
@@ -210,8 +210,8 @@ describe("tagged TTS player", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const player = root!.root.findByProps({ "data-tts-state": "error" });
-    expect(player.findByProps({ "data-tts-transcript": true }).children.join("")).toContain("你好（旁白）");
+    const player = root!.root.findByProps({ "data-speech-state": "error" });
+    expect(player.findByProps({ "data-speech-transcript": true }).children.join("")).toContain("你好（旁白）");
     expect(player.findByProps({ role: "status" }).children.join("")).toContain("Audio unavailable");
     root!.unmount();
   });
@@ -219,10 +219,10 @@ describe("tagged TTS player", () => {
   it("shows the transcript and forgets a stale cache URL when audio loading fails", async () => {
     let calls = 0;
     const client = { synthesize: async () => { calls += 1; return payload; } };
-    clearTtsPreparationCache(client);
+    clearSpeechPreparationCache(client);
     let root: ReturnType<typeof create> | undefined;
     await act(async () => {
-      root = create(createElement(TtsAudioPlayer, {
+      root = create(createElement(SpeechAudioPlayer, {
         text: "缓存已丢失",
         transcript: "缓存已丢失（旁白）",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
@@ -234,13 +234,13 @@ describe("tagged TTS player", () => {
     });
 
     act(() => root!.root.findByType("audio").props.onError());
-    const failed = root!.root.findByProps({ "data-tts-state": "error" });
-    expect(failed.findByProps({ "data-tts-transcript": true }).children.join("")).toContain("缓存已丢失（旁白）");
+    const failed = root!.root.findByProps({ "data-speech-state": "error" });
+    expect(failed.findByProps({ "data-speech-transcript": true }).children.join("")).toContain("缓存已丢失（旁白）");
     root!.unmount();
 
     let remounted: ReturnType<typeof create> | undefined;
     await act(async () => {
-      remounted = create(createElement(TtsAudioPlayer, {
+      remounted = create(createElement(SpeechAudioPlayer, {
         text: "缓存已丢失",
         profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]",
         sessionId: "session-a",

@@ -11,14 +11,14 @@ import {
   DEFAULT_PROVIDER,
   normalizeSettings
 } from "../src/settings.js";
-import { TtsSettingsCard, describeCredential, decodeSettings, saveCredential, type ClientSettingsScope } from "../src/client/settings-card.js";
-import type { TtsSettings } from "../src/settings.js";
+import { SpeechSettingsCard, describeCredential, decodeSettings, saveCredential, type ClientSettingsScope } from "../src/client/settings-card.js";
+import type { SpeechSettings } from "../src/settings.js";
 
-function snapshot(value: Partial<TtsSettings> | undefined, writable = true, status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
+function snapshot(value: Partial<SpeechSettings> | undefined, writable = true, status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
   return { status, value, base: undefined, user: undefined, revision: 1, writable, mode };
 }
 
-function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, rejectFields = new Set<string>(), status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
+function controlledScope(initial: Partial<SpeechSettings> = {}, writable = true, rejectFields = new Set<string>(), status: "ready" | "unavailable" = "ready", mode: "host" | "memory" = "host") {
   let currentSnapshot = snapshot(initial, writable, status, mode);
   const listeners = new Set<() => void>();
   const writes: Array<[string, unknown]> = [];
@@ -56,7 +56,7 @@ function controlledScope(initial: Partial<TtsSettings> = {}, writable = true, re
       listeners.forEach((listener) => listener());
     }
   };
-  return { settings, writes, update(value: Partial<TtsSettings>) { currentSnapshot = { ...currentSnapshot, value }; listeners.forEach((listener) => listener()); } };
+  return { settings, writes, update(value: Partial<SpeechSettings>) { currentSnapshot = { ...currentSnapshot, value }; listeners.forEach((listener) => listener()); } };
 }
 
 function apiFor(statuses: Partial<Record<string, { configured: boolean; writable: boolean }>> = {}, writes: unknown[] = [], reject = false) {
@@ -73,7 +73,7 @@ describe("dual-provider native settings card", () => {
     expect(normalizeSettings(undefined)).toEqual({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     expect(decodeSettings({ provider: "bytedance", alibabaVoice: "  custom  ", bytedanceVoice: "  voice  " })).toEqual({ provider: "bytedance", alibabaVoice: "custom", bytedanceVoice: "voice" });
     expect(decodeSettings({ provider: "nope", alibabaVoice: "", bytedanceVoice: "x".repeat(129) })).toEqual({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
-    const html = renderToStaticMarkup(createElement(TtsSettingsCard, { scope: controlledScope().settings, api: apiFor() }));
+    const html = renderToStaticMarkup(createElement(SpeechSettingsCard, { scope: controlledScope().settings, api: apiFor() }));
     expect(html).toContain('aria-expanded="false"');
   });
 
@@ -97,7 +97,7 @@ describe("dual-provider native settings card", () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     const credentialWrites: unknown[] = [];
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     expect(root!.root.findByType("select").props.value).toBe("alibaba");
     expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.type).toBe("text");
@@ -116,7 +116,7 @@ describe("dual-provider native settings card", () => {
     const controlled = controlledScope({ provider: "bytedance", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     const credentialWrites: unknown[] = [];
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
 
     expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.type).toBe("password");
@@ -137,7 +137,7 @@ describe("dual-provider native settings card", () => {
   it("keeps invalid drafts visible, associates validation, and disables Save", async () => {
     const controlled = controlledScope({ alibabaVoice: "Maia" });
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     const input = root!.root.findByProps({ "data-settings-field": "alibaba-voice" });
     await act(async () => { input.props.onChange({ target: { value: "   " } }); });
@@ -155,7 +155,7 @@ describe("dual-provider native settings card", () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }, true, new Set(["provider"]));
     const credentialWrites: unknown[] = [];
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.onChange({ target: { value: "custom-alibaba" } }); });
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-credential" }).props.onChange({ target: { value: "secret" } }); });
@@ -197,7 +197,7 @@ describe("dual-provider native settings card", () => {
   it("follows clean host updates, preserves dirty drafts, and Discard restores the latest baseline", async () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.onChange({ target: { value: "draft" } }); });
     controlled.update({ provider: "bytedance", alibabaVoice: "host-new", bytedanceVoice: "host-byte" });
@@ -215,7 +215,7 @@ describe("dual-provider native settings card", () => {
   it("clears a provider draft when the Host catches up, then follows its next refresh", async () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     await act(async () => { root!.root.findByType("select").props.onChange({ target: { value: "bytedance" } }); });
 
@@ -232,7 +232,7 @@ describe("dual-provider native settings card", () => {
   it("clears a voice draft when the Host catches up, then follows its next refresh", async () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     await act(async () => { root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.onChange({ target: { value: "draft" } }); });
 
@@ -250,7 +250,7 @@ describe("dual-provider native settings card", () => {
     ["unavailable", "host"],
     ["ready", "memory"]
   ] as const)("hides the settings card for %s/%s snapshots", (status, mode) => {
-    const html = renderToStaticMarkup(createElement(TtsSettingsCard, {
+    const html = renderToStaticMarkup(createElement(SpeechSettingsCard, {
       scope: controlledScope(undefined, false, new Set(), status, mode).settings,
       api: apiFor()
     }));
@@ -260,7 +260,7 @@ describe("dual-provider native settings card", () => {
   it("shows ready non-writable settings without allowing writes", async () => {
     const controlled = controlledScope({ provider: "alibaba", alibabaVoice: "Maia" }, false);
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor() })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("read-only");
     expect(root!.root.findByType("select").props.disabled).toBe(true);
@@ -272,7 +272,7 @@ describe("dual-provider native settings card", () => {
   it("is read-only remotely", async () => {
     const controlled = controlledScope({ provider: "bytedance", bytedanceVoice: "voice" });
     let root: ReturnType<typeof create> | undefined;
-    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor(), localOnly: false })); await Promise.resolve(); });
+    await act(async () => { root = create(createElement(SpeechSettingsCard, { scope: controlled.settings, api: apiFor(), localOnly: false })); await Promise.resolve(); });
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("read-only");
     expect(root!.root.findByType("select").props.disabled).toBe(true);

@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement, Fragment } from "react";
 
 import { renderAssistantBlocks } from "../src/client/assistant-node.js";
-import type { TtsRpcClient } from "../src/player.js";
+import type { SpeechRpcClient } from "../src/player.js";
 
-const client: TtsRpcClient = { synthesize: async () => ({ mediaType: "audio/mpeg", url: "/kepos-tts/audio/a.mp3?sessionId=session-a", bytes: 3 }) };
+const client: SpeechRpcClient = { synthesize: async () => ({ mediaType: "audio/mpeg", url: "/kepos-speech/audio/a.mp3?sessionId=session-a", bytes: 3 }) };
 const t = (key: string) => key;
 
 describe("assistant renderer seam", () => {
@@ -13,7 +13,7 @@ describe("assistant renderer seam", () => {
     const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
       { kind: "text", text: "普通 [[tts:text]]你好[[/tts:text]]。" }
     ], { streaming: false, interrupted: false, t, client, profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a" })));
-    expect(html).toContain('data-tts-state="idle"');
+    expect(html).toContain('data-speech-state="idle"');
     expect(html).toContain("普通");
     expect(html).not.toContain("[[tts:text]]");
   });
@@ -21,15 +21,15 @@ describe("assistant renderer seam", () => {
   it("does not expose a control while streaming or for ordinary text", () => {
     const streaming = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "[[tts:text]]稍后[[/tts:text]]" }], { streaming: true, interrupted: false, t, client, profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a" })));
     const ordinary = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([{ kind: "text", text: "只是回答" }], { streaming: false, interrupted: false, t, client, profileKey: "[\"alibaba\",\"qwen3-tts-flash\",\"Maia\"]", sessionId: "session-a" })));
-    expect(streaming).not.toContain("data-tts-state");
-    expect(ordinary).not.toContain("data-tts-state");
+    expect(streaming).not.toContain("data-speech-state");
+    expect(ordinary).not.toContain("data-speech-state");
   });
 
   it("still mounts tagged speech without a ready profile key", () => {
     const html = renderToStaticMarkup(createElement(Fragment, null, renderAssistantBlocks([
       { kind: "text", text: "[[tts:text]]远程朗读[[/tts:text]]" }
     ], { streaming: false, interrupted: false, t, client, sessionId: "session-a" })));
-    expect(html).toContain('data-tts-state="idle"');
+    expect(html).toContain('data-speech-state="idle"');
   });
 
   it("keeps the pinned Think row and native block path for untagged replies", () => {
@@ -43,6 +43,6 @@ describe("assistant renderer seam", () => {
     expect(html).toContain('data-disclosure-row="true"');
     expect(html).toContain("先判断");
     expect(html).toContain("普通回复");
-    expect(html).not.toContain("data-tts-state");
+    expect(html).not.toContain("data-speech-state");
   });
 });

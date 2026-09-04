@@ -4,7 +4,7 @@ import { compileCssModule } from "./scripts/css-modules.js";
 export default defineConfig({
   plugins: [
     {
-      name: "kepos-tts-css-modules-test",
+      name: "kepos-speech-css-modules-test",
       enforce: "pre",
       async load(id) {
         if (!id.endsWith(".module.dshcss")) return undefined;

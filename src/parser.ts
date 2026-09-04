@@ -1,6 +1,6 @@
-import { TTS_MAX_CHARS } from "./constants.js";
+import { SPEECH_MAX_CHARS } from "./constants.js";
 
-export interface TtsPassage {
+export interface SpeechPassage {
   text: string;
   transcript: string;
   start: number;
@@ -9,11 +9,11 @@ export interface TtsPassage {
 
 export type TaggedTextSegment =
   | { kind: "text"; text: string }
-  | { kind: "tts"; text: string; transcript: string };
+  | { kind: "speech"; text: string; transcript: string };
 
 export interface ParsedTaggedText {
   segments: TaggedTextSegment[];
-  passage?: TtsPassage;
+  passage?: SpeechPassage;
 }
 
 const OPEN = "[[tts:text]]";
@@ -48,13 +48,13 @@ function overlapsFence(start: number, end: number, ranges: Array<[number, number
 }
 
 /** Collapse layout whitespace while retaining all spoken Unicode characters. */
-export function normalizeTtsText(value: string): string {
+export function normalizeSpeechText(value: string): string {
   return value.replace(/[\s\u00a0]+/gu, " ").trim();
 }
 
 function isValidPassage(text: string, raw: string): boolean {
   if (!text || raw.includes("[[") || raw.includes("]]")) return false;
-  return Array.from(text).length <= TTS_MAX_CHARS;
+  return Array.from(text).length <= SPEECH_MAX_CHARS;
 }
 
 /**
@@ -65,7 +65,7 @@ function isValidPassage(text: string, raw: string): boolean {
 export function parseTaggedText(input: string): ParsedTaggedText {
   const fences = fencedRanges(input);
   let cursor = 0;
-  let passage: TtsPassage | undefined;
+  let passage: SpeechPassage | undefined;
 
   while (cursor < input.length) {
     const openAt = input.indexOf(OPEN, cursor);
@@ -74,7 +74,7 @@ export function parseTaggedText(input: string): ParsedTaggedText {
     if (closeAt < 0) break;
     const end = closeAt + CLOSE.length;
     const raw = input.slice(openAt + OPEN.length, closeAt);
-    const normalized = normalizeTtsText(raw);
+    const normalized = normalizeSpeechText(raw);
     if (!passage && !overlapsFence(openAt, end, fences) && isValidPassage(normalized, raw)) {
       passage = { text: normalized, transcript: normalized, start: openAt, end };
       break;
@@ -85,7 +85,7 @@ export function parseTaggedText(input: string): ParsedTaggedText {
   if (!passage) return { segments: [{ kind: "text", text: input }] };
   const segments: TaggedTextSegment[] = [];
   if (passage.start > 0) segments.push({ kind: "text", text: input.slice(0, passage.start) });
-  segments.push({ kind: "tts", text: passage.text, transcript: passage.transcript });
+  segments.push({ kind: "speech", text: passage.text, transcript: passage.transcript });
   if (passage.end < input.length) segments.push({ kind: "text", text: input.slice(passage.end) });
   return { segments, passage };
 }

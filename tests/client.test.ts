@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createProfileSource, createTtsRpcClient } from "../src/client.js";
+import { createProfileSource, createSpeechRpcClient } from "../src/client.js";
 import { RPC_CHANNEL, RPC_ENDPOINT } from "../src/rpc.js";
 
-describe("createTtsRpcClient", () => {
+describe("createSpeechRpcClient", () => {
   it("carries text and framework session identity in the RPC envelope", async () => {
     const calls: unknown[][] = [];
     const connection = {
@@ -14,7 +14,7 @@ describe("createTtsRpcClient", () => {
             ok: true,
             value: {
               mediaType: "audio/mpeg",
-              url: "/kepos-tts/audio/a.mp3?sessionId=session-a",
+              url: "/kepos-speech/audio/a.mp3?sessionId=session-a",
               bytes: 3
             }
           };
@@ -22,7 +22,7 @@ describe("createTtsRpcClient", () => {
       }
     };
 
-    await createTtsRpcClient(connection as never).synthesize("你好", "session-a");
+    await createSpeechRpcClient(connection as never).synthesize("你好", "session-a");
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.slice(0, 3)).toEqual([
