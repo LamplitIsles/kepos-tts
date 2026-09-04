@@ -7,6 +7,12 @@ the resulting MP3, and replaces the block with the browser's native audio
 player. The Host service also exposes bounded, synchronous Qwen ASR to trusted
 in-process callers.
 
+Locally transcribed user turns use a `🎙️ ` prefix and can end in a recognized
+expression label such as `[neutral]`. The Speech system prompt defines both as
+voice metadata: the marker identifies the source, and the label is an
+audio-level ASR classification rather than message content or a claim about the
+speaker's inner state.
+
 Source: <https://github.com/LamplitIsles/kepos-speech>.
 
 ## Install for DSH
