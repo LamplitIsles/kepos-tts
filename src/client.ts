@@ -27,6 +27,7 @@ export const inject = ["connection", "locale", "remote", "remote.credentials", "
 
 export type TtsLocaleKey =
   | "title" | "description" | "provider" | "providerHint" | "voice" | "voiceHint" | "apiKey" | "apiKeyHint"
+  | "dashscopeApiKey" | "dashscopeApiKeyHint" | "volcengineApiKey" | "volcengineApiKeyHint"
   | "configured" | "notConfigured" | "expand" | "collapse" | "unsaved" | "save"
   | "saving" | "discard" | "saveFailed" | "readOnly" | "voiceRequired" | "voiceTooLong" | "message.reasoning"
   | "copy" | "copied" | "markdown.footnotes"
@@ -48,6 +49,10 @@ const en: Record<TtsLocaleKey, string> = {
   voiceHint: "Enter a provider-supported Voice ID (up to 128 characters).",
   apiKey: "API key",
   apiKeyHint: "Enter a new key to replace the configured key. Leave blank to keep it.",
+  dashscopeApiKey: "DashScope API key (Alibaba TTS + Qwen speech recognition)",
+  dashscopeApiKeyHint: "Shared by Alibaba TTS and Qwen speech recognition. Leave blank to keep it.",
+  volcengineApiKey: "Volcengine API key (ByteDance TTS)",
+  volcengineApiKeyHint: "Used only for ByteDance TTS. Leave blank to keep it.",
   configured: "Configured",
   notConfigured: "Not configured",
   expand: "Expand",
@@ -82,6 +87,10 @@ const zh: Record<TtsLocaleKey, string> = {
   voiceHint: "输入服务商支持的声音 ID（最多 128 个字符）。",
   apiKey: "API 密钥",
   apiKeyHint: "输入新密钥以替换现有密钥。留空则保留现有密钥。",
+  dashscopeApiKey: "DashScope API 密钥（供阿里云 TTS 和通义千问语音识别共享）",
+  dashscopeApiKeyHint: "供阿里云 TTS 和通义千问语音识别共享。留空则保留现有密钥。",
+  volcengineApiKey: "Volcengine API 密钥（仅 ByteDance TTS）",
+  volcengineApiKeyHint: "仅用于 ByteDance TTS。留空则保留现有密钥。",
   configured: "已配置",
   notConfigured: "未配置",
   expand: "展开",

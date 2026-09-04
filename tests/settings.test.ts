@@ -112,6 +112,28 @@ describe("dual-provider native settings card", () => {
     root!.unmount();
   });
 
+  it("keeps the shared DashScope credential visible and writable with ByteDance selected", async () => {
+    const controlled = controlledScope({ provider: "bytedance", bytedanceVoice: DEFAULT_BYTEDANCE_VOICE });
+    const credentialWrites: unknown[] = [];
+    let root: ReturnType<typeof create> | undefined;
+    await act(async () => { root = create(createElement(TtsSettingsCard, { scope: controlled.settings, api: apiFor({}, credentialWrites) })); await Promise.resolve(); });
+    await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
+
+    expect(root!.root.findByProps({ "data-settings-field": "bytedance-credential" }).props.type).toBe("password");
+    const shared = root!.root.findByProps({ "data-settings-field": "alibaba-credential" });
+    expect(shared.props.type).toBe("password");
+    expect(shared.props["data-credential-ref"]).toBe(ALIBABA_CREDENTIAL_REF);
+    expect(root!.root.findAllByType("label").some((label) => label.children.join(" ").includes("Qwen speech recognition"))).toBe(true);
+
+    await act(async () => { shared.props.onChange({ target: { value: "shared-secret" } }); });
+    const save = root!.root.findAllByType("button").find((button) => button.props.children === "Save")!;
+    await act(async () => { await save.props.onClick(); });
+    expect(credentialWrites).toEqual([["set", { ref: ALIBABA_CREDENTIAL_REF, value: "shared-secret" }]]);
+    expect(controlled.writes).toEqual([]);
+    expect(root!.root.findByType("select").props.value).toBe("bytedance");
+    root!.unmount();
+  });
+
   it("keeps invalid drafts visible, associates validation, and disables Save", async () => {
     const controlled = controlledScope({ alibabaVoice: "Maia" });
     let root: ReturnType<typeof create> | undefined;
@@ -243,7 +265,7 @@ describe("dual-provider native settings card", () => {
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("read-only");
     expect(root!.root.findByType("select").props.disabled).toBe(true);
     expect(root!.root.findByProps({ "data-settings-field": "alibaba-voice" }).props.disabled).toBe(true);
-    expect(root!.root.findByProps({ type: "password" }).props.disabled).toBe(true);
+    expect(root!.root.findAllByProps({ type: "password" }).every((input) => input.props.disabled)).toBe(true);
     root!.unmount();
   });
 
@@ -254,7 +276,8 @@ describe("dual-provider native settings card", () => {
     await act(async () => { root!.root.findByProps({ "aria-expanded": false }).props.onClick(); });
     expect(root!.root.findByProps({ role: "status" }).children.join(" ")).toContain("read-only");
     expect(root!.root.findByType("select").props.disabled).toBe(true);
-    expect(root!.root.findByProps({ type: "password" }).props.disabled).toBe(true);
+    expect(root!.root.findAllByProps({ type: "password" }).every((input) => input.props.disabled)).toBe(true);
+    expect(root!.root.findByProps({ "data-settings-field": "alibaba-credential" }).props.disabled).toBe(true);
     root!.unmount();
   });
 });

@@ -16,9 +16,13 @@ browser. It returns a workspace-owned URL and keeps native `<audio>` playback
 unchanged.
 
 **Host TTS service**:
-The optional in-process Cordis service named `keposTts`. A Host plugin calls
-`synthesize({ sessionId, text }, signal?)` and receives bounded MP3 bytes for a
-live session. It has no browser URL, filesystem path, or public HTTP route.
+The optional in-process Cordis service temporarily named `keposTts`. A Host
+plugin calls `synthesize({ sessionId, text }, signal?)` for bounded MP3 bytes,
+or `transcribe({ sessionId, mediaType, data, language? }, signal?)` for a
+short, non-real-time Qwen ASR result. Both operations require a live session;
+the transcription path uses the shared DashScope credential and returns no
+browser URL, filesystem path, public HTTP route, or persisted artifact. The
+service name remains TTS-oriented until a future user-approved rename.
 
 **Live session**:
 A DSH session that resolves to an absolute workspace cwd through the Host
@@ -34,3 +38,14 @@ artifact and its bounded read contract.
 The normalized provider, provider model/resource identity, and Voice ID used
 for one request and its cache key. Credentials are resolved separately and
 never enter the profile identity or returned service value.
+
+**Shared DashScope credential**:
+`KEPOS_TTS_DASHSCOPE_API_KEY`, used by Alibaba TTS and the fixed
+`qwen3-asr-flash` Host transcription operation. It is configured through the
+write-only native settings card regardless of the selected TTS output provider;
+the Volcengine credential remains ByteDance-TTS-only.
+
+**Speech-expression label**:
+An optional discrete label returned by Qwen's model for a sentence. It is
+model-derived speech-expression metadata, not a factual claim about a speaker's
+inner state, diagnosis, or decision signal.

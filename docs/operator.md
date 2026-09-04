@@ -8,19 +8,22 @@ installed DSH Web runtime on a test-owned loopback port, and verifies the real
 host patch, Settings registration, RPC route, and browser loader. It never
 touches a live DSH profile or credential.
 
-Configure Alibaba or ByteDance, its independent Voice ID, and its key from a
-local loopback DSH Web Settings session. The defaults are `Maia` and
+Configure Alibaba or ByteDance and its independent Voice ID from a local
+loopback DSH Web Settings session. The defaults are `Maia` and
 `zh_female_sajiaoxuemei_uranus_bigtts`, but Voice IDs are free-form (up to 128
-characters). The card reports each selected credential's configured state and
-never renders its value. DSH stores Alibaba under
-`KEPOS_TTS_DASHSCOPE_API_KEY` and ByteDance under
+characters). The DashScope key is always shown as a write-only field labelled
+shared by Alibaba TTS and Qwen speech recognition, even when ByteDance is the
+selected TTS provider. The Volcengine key is shown only for ByteDance TTS. DSH
+stores DashScope under `KEPOS_TTS_DASHSCOPE_API_KEY` and ByteDance under
 `KEPOS_TTS_VOLCENGINE_API_KEY`; there is no agenix or remote configuration
-endpoint. An unavailable or memory-backed remote Settings scope does not
+endpoint. The provider selector is TTS-only: Qwen ASR is the sole STT provider,
+with no STT selector. An unavailable or memory-backed remote Settings scope does not
 render this card; a ready non-writable Host scope is read-only. Tagged TTS
 still reaches the Host in those scopes, but page-memory preparation sharing
 starts only after a real ready Host profile exists. When a tagged message
-completes, the browser immediately prepares its MP3 and replaces the tag with the browser's native
-audio player. If synthesis fails, the transcript stays visible.
+completes, the browser immediately prepares its MP3 and replaces the tag with
+the browser's native audio player. If synthesis fails, the transcript stays
+visible.
 
 While the plugin is mounted, Host consumers can optionally read
 `ctx.get("keposTts")` and call `synthesize({ sessionId, text }, signal?)` for
@@ -28,6 +31,21 @@ one bounded `{ mediaType: "audio/mpeg", data: Uint8Array }` result. The
 service shares the same validation, provider credentials, and workspace cache
 as browser TTS, and disappears when the plugin is disposed. It never exposes a
 browser URL or cache path and does not add a public synthesis route.
+
+The same service exposes `transcribe({ sessionId, mediaType, data, language? },
+signal?)`. It accepts one supported, non-empty audio `Uint8Array` no larger than
+10 MB and validates the live session before resolving the shared DashScope key.
+It sends a Base64 data URL to the synchronous `qwen3-asr-flash` endpoint and
+propagates cancellation. DashScope enforces the five-minute duration boundary;
+Kepos deliberately does not decode arbitrary containers to estimate it. The
+returned provider-neutral value contains complete text and ordered sentence
+records with start/end milliseconds, detected language when available, and an
+optional discrete speech-expression label. The label is model-derived speech
+expression metadata, not a psychological assessment or fact about the speaker.
+Audio, transcripts, raw provider responses, and credentials are neither stored
+nor included in failures or diagnostics. The service remains a temporary
+TTS-named Host seam pending a future user-approved rename; Matrix and Companion
+adapters are not part of this package.
 
 Artifacts live under the session's immutable workspace cwd at
 `.dsh/kepos-tts/audio/<sha256>.mp3`. The digest includes the normalized passage,
