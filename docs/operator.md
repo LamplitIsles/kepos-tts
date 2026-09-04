@@ -33,9 +33,9 @@ as browser TTS, and disappears when the plugin is disposed. It never exposes a
 browser URL or cache path and does not add a public synthesis route.
 
 The same service exposes `transcribe({ sessionId, mediaType, data, language? },
-signal?)`. It accepts one supported, non-empty audio `Uint8Array` no larger than
-whose Base64 Data URL is no larger than 10 MB and validates the live session
-before resolving the shared DashScope key. It sends that private Data URL to
+signal?)`. It accepts one supported, non-empty audio `Uint8Array` whose Base64
+Data URL is no larger than 10 MB and validates the live session before
+resolving the shared DashScope key. It sends that private Data URL to
 the synchronous `qwen3-asr-flash` endpoint and propagates cancellation.
 DashScope enforces the five-minute duration boundary; Kepos deliberately does
 not decode arbitrary containers to estimate it. The documented provider-neutral
