@@ -48,6 +48,10 @@ export interface TtsSettingsCardProps {
     voiceHint: string;
     apiKey: string;
     apiKeyHint: string;
+    dashscopeApiKey: string;
+    dashscopeApiKeyHint: string;
+    volcengineApiKey: string;
+    volcengineApiKeyHint: string;
     configured: string;
     notConfigured: string;
     expand: string;
@@ -210,7 +214,6 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
   const selectedSavedVoice = baseline[selectedField];
   const selectedDraftVoice = draftVoices[selectedProvider];
   const selectedVoice = selectedDraftVoice ?? selectedSavedVoice;
-  const selectedKey = draftKeys[selectedProvider] ?? "";
   const voiceError = validateVoiceDraft(selectedDraftVoice, defaultVoiceFor(selectedProvider));
 
   const providerDirty = draftProvider !== undefined && draftProvider !== baseline.provider;
@@ -233,8 +236,24 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     providerHint: t?.("providerHint") ?? "New passages use this provider after you save.",
     voice: t?.("voice") ?? "Voice ID",
     voiceHint: t?.("voiceHint") ?? "Enter a provider-supported Voice ID (up to 128 characters).",
-    apiKey: labels?.apiKey ?? t?.("apiKey") ?? (selectedProvider === "bytedance" ? "Volcengine API key" : "DashScope API key"),
-    apiKeyHint: t?.("apiKeyHint") ?? "Enter a new key to replace the configured key. Leave blank to keep it.",
+    apiKey: labels?.apiKey ?? t?.("apiKey") ?? "API key",
+    apiKeyHint: labels?.apiKeyHint ?? t?.("apiKeyHint") ?? "Enter a new key to replace the configured key. Leave blank to keep it.",
+    dashscopeApiKey: labels?.dashscopeApiKey
+      ?? (selectedProvider === "alibaba" ? labels?.apiKey : undefined)
+      ?? t?.("dashscopeApiKey")
+      ?? "DashScope API key (Alibaba TTS + Qwen speech recognition)",
+    dashscopeApiKeyHint: labels?.dashscopeApiKeyHint
+      ?? (selectedProvider === "alibaba" ? labels?.apiKeyHint : undefined)
+      ?? t?.("dashscopeApiKeyHint")
+      ?? "Shared by Alibaba TTS and Qwen speech recognition. Leave blank to keep it.",
+    volcengineApiKey: labels?.volcengineApiKey
+      ?? (selectedProvider === "bytedance" ? labels?.apiKey : undefined)
+      ?? t?.("volcengineApiKey")
+      ?? "Volcengine API key (ByteDance TTS)",
+    volcengineApiKeyHint: labels?.volcengineApiKeyHint
+      ?? (selectedProvider === "bytedance" ? labels?.apiKeyHint : undefined)
+      ?? t?.("volcengineApiKeyHint")
+      ?? "Used only for ByteDance TTS. Leave blank to keep it.",
     configured: t?.("configured") ?? "Configured",
     notConfigured: t?.("notConfigured") ?? "Not configured",
     expand: t?.("expand") ?? "Expand",
@@ -290,11 +309,11 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     setFailed(false);
   };
 
-  const editKey = (event: { target: { value: string } }) => {
-    if (!canWriteCredential(selectedProvider) || saving) return;
+  const editCredential = (provider: TtsProvider, event: { target: { value: string } }) => {
+    if (!canWriteCredential(provider) || saving) return;
     const value = event.target.value;
-    forgetPreservedKey(selectedProvider);
-    setDraftKeys((current) => ({ ...current, [selectedProvider]: value }));
+    forgetPreservedKey(provider);
+    setDraftKeys((current) => ({ ...current, [provider]: value }));
     setFailed(false);
   };
 
@@ -372,12 +391,58 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
     }
   };
 
-  const selectedCredential = credentials[selectedProvider] ?? DEFAULT_STATUS;
   const voiceErrorText = voiceError === "required"
     ? text.voiceRequired
     : voiceError === "too-long"
       ? text.voiceTooLong
       : undefined;
+
+  const credentialField = (
+    provider: TtsProvider,
+    label: string,
+    hint: string,
+    id = `${cardId}-${provider}-key`
+  ) => {
+    const status = credentials[provider] ?? DEFAULT_STATUS;
+    return createElement(
+      "div",
+      { className: styles.settingsField, key: provider },
+      createElement(
+        "div",
+        { className: styles.settingsFieldHead },
+        createElement("label", { className: styles.settingsFieldLabel, htmlFor: id }, label),
+        createElement(
+          "span",
+          { className: status.configured ? styles.settingsBadge : styles.settingsBadgeMuted, "data-configured": status.configured ? "yes" : "no" },
+          status.configured ? text.configured : text.notConfigured
+        )
+      ),
+      createElement("input", {
+        id,
+        className: styles.settingsInput,
+        type: "password",
+        autoComplete: "new-password",
+        value: draftKeys[provider] ?? "",
+        disabled: saving || !canWriteCredential(provider),
+        onChange: (event: { target: { value: string } }) => editCredential(provider, event),
+        "aria-describedby": `${id}-hint`,
+        "data-settings-field": `${provider}-credential`,
+        "data-credential-ref": credentialRefFor(provider)
+      }),
+      createElement("p", { className: styles.settingsHint, id: `${id}-hint` }, hint)
+    );
+  };
+
+  const credentialFields = selectedProvider === "bytedance"
+    ? [
+      credentialField("bytedance", text.volcengineApiKey, text.volcengineApiKeyHint, `${cardId}-key`),
+      // DashScope is shared with Qwen speech recognition, so keep it visible
+      // beside ByteDance's TTS-only credential in every settings view. The
+      // normal local-only guard still controls whether the write-only input is
+      // editable.
+      credentialField("alibaba", text.dashscopeApiKey, text.dashscopeApiKeyHint)
+    ]
+    : [credentialField("alibaba", text.dashscopeApiKey, text.dashscopeApiKeyHint, `${cardId}-key`)];
 
   return createElement(
     "li",
@@ -454,32 +519,7 @@ export function TtsSettingsCard({ scope, api, localOnly = true, t, labels }: Tts
           }),
           createElement("p", { className: [styles.settingsHint, voiceErrorText ? styles.settingsInvalid : undefined].filter(Boolean).join(" "), id: `${cardId}-voice-hint` }, voiceErrorText ?? text.voiceHint)
         ),
-        createElement(
-          "div",
-          { className: styles.settingsField },
-          createElement(
-            "div",
-            { className: styles.settingsFieldHead },
-            createElement("label", { className: styles.settingsFieldLabel, htmlFor: `${cardId}-key` }, text.apiKey),
-            createElement(
-              "span",
-              { className: selectedCredential.configured ? styles.settingsBadge : styles.settingsBadgeMuted, "data-configured": selectedCredential.configured ? "yes" : "no" },
-              selectedCredential.configured ? text.configured : text.notConfigured
-            )
-          ),
-          createElement("input", {
-            id: `${cardId}-key`,
-            className: styles.settingsInput,
-            type: "password",
-            autoComplete: "new-password",
-            value: selectedKey,
-            disabled: saving || !canWriteCredential(selectedProvider),
-            onChange: editKey,
-            "aria-describedby": `${cardId}-key-hint`,
-            "data-settings-field": `${selectedProvider}-credential`
-          }),
-          createElement("p", { className: styles.settingsHint, id: `${cardId}-key-hint` }, text.apiKeyHint)
-        ),
+        ...credentialFields,
         createElement(
           "div",
           { className: styles.settingsFooter },

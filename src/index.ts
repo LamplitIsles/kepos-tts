@@ -71,7 +71,9 @@ export {
   RPC_ENDPOINT,
   type KeposTtsAudio,
   type KeposTtsService,
-  type KeposTtsSynthesisRequest
+  type KeposTtsSynthesisRequest,
+  type KeposTtsTranscription,
+  type KeposTtsTranscriptionRequest
 } from "./gateway.js";
 export * from "./core.js";
 

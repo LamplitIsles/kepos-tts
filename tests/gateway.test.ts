@@ -12,6 +12,8 @@ import {
   DASHSCOPE_ENDPOINT,
   DEFAULT_ALIBABA_VOICE,
   DEFAULT_BYTEDANCE_VOICE,
+  MAX_ASR_DATA_URL_BYTES,
+  QWEN_ASR_MODEL,
   normalizeSettings,
   profileFromSettings,
   providerProfileKey
@@ -359,5 +361,185 @@ describe("provider-neutral TTS gateway", () => {
     controller.abort();
     await expect(service.synthesize({ sessionId: "session-a", text: "你好" }, controller.signal)).rejects.toMatchObject({ category: "cancelled" });
     await expect(service.synthesize({ sessionId: "session-a", text: "" })).rejects.toMatchObject({ category: "invalid-input" });
+  });
+
+  it("transcribes bounded audio with the fixed Qwen model and normalizes audio annotations", async () => {
+    const cwd = await workspace();
+    const refs: unknown[] = [];
+    let request: { body: any; headers: Headers; signal: AbortSignal | null | undefined } | undefined;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async (ref) => { refs.push(ref); return { value: "asr-secret", source: "test" }; } },
+      // ByteDance remains the selected TTS output, but ASR must still use the
+      // shared DashScope credential.
+      getSettings: () => ({ provider: "bytedance" }),
+      fetch: async (url, init) => {
+        request = { body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers), signal: init?.signal };
+        expect(String(url)).toBe(DASHSCOPE_ENDPOINT);
+        return jsonResponse({
+          output: {
+            choices: [{
+              finish_reason: "stop",
+              message: {
+                annotations: [{ type: "audio_info", language: "zh", emotion: "happy" }],
+                content: [{ text: "识别结果" }],
+                role: "assistant",
+                confidence: 0.99
+              }
+            }]
+          },
+          provider_private_field: "must not escape"
+        });
+      }
+    });
+    const result = await gateway.transcribe({
+      sessionId: "session-a",
+      mediaType: "audio/ogg",
+      data: new Uint8Array([0, 1, 2, 255]),
+      language: "zh"
+    });
+    expect(result).toEqual({ text: "识别结果", language: "zh", expression: "happy" });
+    expect(request?.headers.get("authorization")).toBe("Bearer asr-secret");
+    expect(request?.body).toEqual({
+      model: QWEN_ASR_MODEL,
+      input: { messages: [{ role: "user", content: [{ audio: "data:audio/ogg;base64,AAEC/w==" }] }] },
+      parameters: { asr_options: { enable_itn: true, language: "zh" } },
+      stream: false
+    });
+    expect(refs).toEqual([ALIBABA_CREDENTIAL_REF]);
+    expect(JSON.stringify(result)).not.toContain("provider_private_field");
+    expect(JSON.stringify(result)).not.toContain("asr-secret");
+    expect(JSON.stringify(result)).not.toContain("confidence");
+  });
+
+  it("accepts the documented synchronous choices shape and omits unknown expression labels", async () => {
+    const cwd = await workspace();
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async () => jsonResponse({
+        output: {
+          choices: [{
+            message: {
+              content: [{ text: "无时码文本" }],
+              annotations: [{ type: "audio_info", language: "en", emotion: "not-a-label" }]
+            }
+          }]
+        }
+      })
+    });
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([3]) }))
+      .resolves.toEqual({ text: "无时码文本", language: "en" });
+  });
+
+  it("accepts the exact Base64 Data URL boundary and rejects the next byte before admission", async () => {
+    const cwd = await workspace();
+    const mediaType = "audio/x-wav";
+    const prefixLength = `data:${mediaType};base64,`.length;
+    const exactBytes = Math.floor((MAX_ASR_DATA_URL_BYTES - prefixLength) / 4) * 3;
+    expect(prefixLength + Math.ceil(exactBytes / 3) * 4).toBe(MAX_ASR_DATA_URL_BYTES);
+    const refs: unknown[] = [];
+    let requests = 0;
+    let observedDataUrlLength = 0;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async (ref) => { refs.push(ref); return { value: "secret", source: "test" }; } },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async (_url, init) => {
+        requests += 1;
+        const body = JSON.parse(String(init?.body)) as { input: { messages: Array<{ content: Array<{ audio: string }> }> } };
+        observedDataUrlLength = body.input.messages[0]!.content[0]!.audio.length;
+        return jsonResponse({ output: { choices: [{ message: { content: [{ text: "边界" }] } }] } });
+      }
+    });
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType, data: new Uint8Array(exactBytes) }))
+      .resolves.toEqual({ text: "边界" });
+    expect(refs).toEqual([ALIBABA_CREDENTIAL_REF]);
+    expect(requests).toBe(1);
+    expect(observedDataUrlLength).toBe(MAX_ASR_DATA_URL_BYTES);
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType, data: new Uint8Array(exactBytes + 1) }))
+      .rejects.toMatchObject({ category: "invalid-input" });
+    expect(refs).toHaveLength(1);
+    expect(requests).toBe(1);
+  });
+
+  it("rejects invalid audio and unavailable sessions before credential or provider admission", async () => {
+    const cwd = await workspace();
+    let credentials = 0;
+    let requests = 0;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => { credentials += 1; return { value: "secret", source: "test" }; } },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async () => { requests += 1; return jsonResponse({ output: { text: "unexpected" } }); }
+    });
+    const valid = { sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) };
+    await expect(gateway.transcribe({ ...valid, mediaType: "text/plain" })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(gateway.transcribe({ ...valid, data: new Uint8Array(MAX_ASR_DATA_URL_BYTES + 1) })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(gateway.transcribe({ ...valid, data: [] })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(gateway.transcribe({ ...valid, language: "xx" })).rejects.toMatchObject({ category: "invalid-input" });
+    await expect(gateway.transcribe({ ...valid, sessionId: "missing" })).rejects.toMatchObject({ category: "unavailable" });
+    expect(credentials).toBe(0);
+    expect(requests).toBe(0);
+  });
+
+  it("fails safely for a missing shared credential and never calls the provider", async () => {
+    const cwd = await workspace();
+    const refs: unknown[] = [];
+    let requests = 0;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async (ref) => { refs.push(ref); return undefined; } },
+      getSettings: () => ({ provider: "bytedance" }),
+      fetch: async () => { requests += 1; throw new Error("must not call provider"); }
+    });
+    await expect(gateway.transcribe({ sessionId: "session-a", mediaType: "audio/wav", data: new Uint8Array([1, 2]) }))
+      .rejects.toMatchObject({ category: "unavailable", diagnostic: { stage: "credential" } });
+    expect(refs).toEqual([ALIBABA_CREDENTIAL_REF]);
+    expect(requests).toBe(0);
+  });
+
+  it("classifies malformed and rejected ASR responses without exposing body fields", async () => {
+    const cwd = await workspace();
+    const failures: unknown[] = [];
+    const base = {
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "provider-secret", source: "test" }) },
+      getSettings: () => ({ provider: "alibaba" as const }),
+      onFailure: (failure: unknown) => failures.push(failure)
+    };
+    const malformed = new TtsGateway({ ...base, fetch: async () => jsonResponse({ output: { text: 42, details: "private transcript" } }) });
+    await expect(malformed.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ category: "provider-invalid-transcription" });
+    const rejected = new TtsGateway({
+      ...base,
+      fetch: async () => jsonResponse({ error: "provider-secret rejected private transcript" }, 429)
+    });
+    await expect(rejected.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ category: "provider-rejected" });
+    expect(JSON.stringify(failures)).not.toContain("provider-secret");
+    expect(JSON.stringify(failures)).not.toContain("private transcript");
+  });
+
+  it("propagates cancellation to DashScope and classifies an aborted request", async () => {
+    const cwd = await workspace();
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | null | undefined;
+    const gateway = new TtsGateway({
+      sessions: sessionStore(cwd),
+      credentials: { resolve: async () => ({ value: "secret", source: "test" }) },
+      getSettings: () => ({ provider: "alibaba" }),
+      fetch: async (_url, init) => {
+        observedSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }
+    });
+    const pending = gateway.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1]) }, controller.signal);
+    await vi.waitFor(() => expect(observedSignal).toBe(controller.signal));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ category: "cancelled" });
   });
 });

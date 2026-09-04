@@ -2,12 +2,20 @@ import { credentialRef, type CredentialProvider, type ResolvedCredential } from 
 import type { HostConnectionRpc, ConnectionRpcHandler, ConnectionRpcResult } from "@deepseek-ai/dsh-client-connection";
 
 import {
+  ALIBABA_CREDENTIAL_REF,
   ALIBABA_MODEL,
   BYTEDANCE_ENDPOINT,
   BYTEDANCE_RESOURCE_ID,
   DASHSCOPE_ENDPOINT,
+  MAX_ASR_DATA_URL_BYTES,
+  QWEN_ASR_EXPRESSIONS,
+  QWEN_ASR_LANGUAGES,
+  QWEN_ASR_MEDIA_TYPES,
+  QWEN_ASR_MODEL,
   TTS_MAX_CHARS,
   profileFromSettings,
+  type QwenAsrExpression,
+  type QwenAsrLanguage,
   type TtsProfile
 } from "./constants.js";
 import { normalizeTtsText } from "./parser.js";
@@ -37,6 +45,7 @@ export type TtsFailureCategory =
   | "unavailable"
   | "provider-rejected"
   | "provider-invalid-audio"
+  | "provider-invalid-transcription"
   | "internal"
   | "cancelled";
 
@@ -49,7 +58,7 @@ export interface TtsFailureDiagnostic {
   responseContentType?: string;
   responseBytes?: number;
   requestId?: string;
-  responseIssue?: "read-failed" | "invalid-json" | "invalid-frame" | "no-data-frames";
+  responseIssue?: "read-failed" | "invalid-json" | "invalid-frame" | "no-data-frames" | "invalid-transcription";
 }
 
 /** Stable input accepted by the optional Host-facing `keposTts` service. */
@@ -64,9 +73,28 @@ export interface KeposTtsAudio {
   data: Uint8Array;
 }
 
+/** A short audio attachment accepted by the Host-only Qwen ASR operation. */
+export interface KeposTtsTranscriptionRequest {
+  sessionId: string;
+  mediaType: string;
+  data: Uint8Array;
+  /** Optional recognition hint; it is never returned as a detected result. */
+  language?: QwenAsrLanguage;
+}
+
+/** Provider-neutral Qwen ASR result returned to a trusted Host caller. */
+export interface KeposTtsTranscription {
+  text: string;
+  /** Audio-level language annotation from the model, when present. */
+  language?: QwenAsrLanguage;
+  /** Audio-level model classification, not a fact about the speaker's inner state. */
+  expression?: QwenAsrExpression;
+}
+
 /** Optional in-process Host capability offered while the Kepos plugin is mounted. */
 export interface KeposTtsService {
   synthesize(request: KeposTtsSynthesisRequest, signal?: AbortSignal): Promise<KeposTtsAudio>;
+  transcribe(request: KeposTtsTranscriptionRequest, signal?: AbortSignal): Promise<KeposTtsTranscription>;
 }
 
 /** Cordis key for the optional Host TTS capability. */
@@ -122,6 +150,18 @@ export class TtsGatewayError extends Error {
     this.category = category;
     this.diagnostic = diagnostic;
   }
+}
+
+function reportGatewayFailure(error: unknown, onFailure?: (failure: TtsFailureDiagnostic) => void): TtsGatewayError {
+  const typed = error instanceof TtsGatewayError ? error : new TtsGatewayError("internal");
+  if (typed.category !== "invalid-input" && typed.category !== "cancelled") {
+    try {
+      onFailure?.({ category: typed.category, ...typed.diagnostic });
+    } catch {
+      // Observability must not change the operation result.
+    }
+  }
+  return typed;
 }
 
 function providerDiagnostic(
@@ -191,6 +231,7 @@ function responseDiagnostic(response: Response, responseBytes?: number): Pick<Tt
   const responseContentType = response.headers.get("content-type")?.slice(0, 128);
   const requestId = (
     response.headers.get("x-tt-logid")
+    ?? response.headers.get("x-dashscope-request-id")
     ?? response.headers.get("x-request-id")
     ?? response.headers.get("x-api-request-id")
   )?.slice(0, 256);
@@ -238,6 +279,151 @@ function base64ToBytes(value: string): Uint8Array | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Encode attachment bytes without building an argument list proportional to the file. */
+function bytesToBase64(bytes: Uint8Array): string {
+  const buffer = (globalThis as { Buffer?: { from(value: Uint8Array): { toString(encoding: string): string } } }).Buffer;
+  if (buffer) return buffer.from(bytes).toString("base64");
+  let encoded = "";
+  // Keep every chunk on a three-byte boundary so concatenating the encoded
+  // chunks is equivalent to encoding the complete byte sequence.
+  const chunkSize = 0x7ffe;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
+    let binary = "";
+    for (const byte of chunk) binary += String.fromCharCode(byte);
+    encoded += btoa(binary);
+  }
+  return encoded;
+}
+
+function dataUrlLength(mediaType: string, byteLength: number): number {
+  return `data:${mediaType};base64,`.length + Math.ceil(byteLength / 3) * 4;
+}
+
+interface ParsedTranscriptionRequest {
+  sessionId: string;
+  mediaType: string;
+  data: Uint8Array;
+  language?: QwenAsrLanguage;
+}
+
+function transcriptionRequestFromPayload(payload: unknown): ParsedTranscriptionRequest {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  const record = payload as Record<string, unknown>;
+  const keys = Object.keys(record);
+  const allowed = new Set(["sessionId", "mediaType", "data", "language"]);
+  if (
+    keys.some((key) => !allowed.has(key))
+    || !keys.includes("sessionId")
+    || !keys.includes("mediaType")
+    || !keys.includes("data")
+  ) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  if (typeof record.sessionId !== "string" || !record.sessionId.trim()) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  if (!(record.data instanceof Uint8Array) || record.data.byteLength === 0) {
+    throw new TtsGatewayError("invalid-input");
+  }
+
+  if (typeof record.mediaType !== "string" || record.mediaType.length > 256) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  const mediaType = record.mediaType.trim().toLowerCase();
+  const baseMediaType = mediaType.split(";", 1)[0]?.trim();
+  if (
+    !baseMediaType
+    || !QWEN_ASR_MEDIA_TYPES.includes(baseMediaType as (typeof QWEN_ASR_MEDIA_TYPES)[number])
+    || !/^audio\/[a-z0-9][a-z0-9.+-]*$/u.test(baseMediaType)
+    || !/^audio\/[a-z0-9][a-z0-9.+-]*(?:\s*;\s*[a-z0-9!#$&^_.+-]+=[a-z0-9!#$&^_.+-]+)*$/u.test(mediaType)
+  ) {
+    throw new TtsGatewayError("invalid-input");
+  }
+  if (dataUrlLength(mediaType, record.data.byteLength) > MAX_ASR_DATA_URL_BYTES) {
+    throw new TtsGatewayError("invalid-input");
+  }
+
+  const languageValue = record.language;
+  let language: QwenAsrLanguage | undefined;
+  if (languageValue !== undefined) {
+    if (typeof languageValue !== "string") throw new TtsGatewayError("invalid-input");
+    const normalized = languageValue.trim().toLowerCase();
+    if (!QWEN_ASR_LANGUAGES.includes(normalized as QwenAsrLanguage)) throw new TtsGatewayError("invalid-input");
+    language = normalized as QwenAsrLanguage;
+  }
+  return {
+    sessionId: record.sessionId,
+    mediaType,
+    data: record.data,
+    ...(language === undefined ? {} : { language })
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function languageValue(value: unknown): QwenAsrLanguage | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return QWEN_ASR_LANGUAGES.includes(normalized as QwenAsrLanguage)
+    ? normalized as QwenAsrLanguage
+    : undefined;
+}
+
+function expressionValue(value: unknown): QwenAsrExpression | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return QWEN_ASR_EXPRESSIONS.includes(normalized as QwenAsrExpression)
+    ? normalized as QwenAsrExpression
+    : undefined;
+}
+
+function textFromContent(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const parts: string[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.text !== "string") return undefined;
+    parts.push(item.text);
+  }
+  return parts.join("");
+}
+
+function syncAnnotations(value: unknown): { language?: QwenAsrLanguage; expression?: QwenAsrExpression } {
+  if (!Array.isArray(value)) return {};
+  let language: QwenAsrLanguage | undefined;
+  let expression: QwenAsrExpression | undefined;
+  for (const annotation of value) {
+    if (!isRecord(annotation)) continue;
+    language ??= languageValue(annotation.language);
+    expression ??= expressionValue(annotation.emotion);
+  }
+  return {
+    ...(language === undefined ? {} : { language }),
+    ...(expression === undefined ? {} : { expression })
+  };
+}
+
+/** Normalize the bounded provider body and discard provider-specific fields. */
+export function normalizeQwenAsrResponse(body: unknown): KeposTtsTranscription {
+  if (!isRecord(body)) throw new Error("invalid-transcription");
+  const output = isRecord(body.output) ? body.output : undefined;
+  const choices = output && Array.isArray(output.choices) ? output.choices : undefined;
+  const choice = choices?.[0];
+  const message = isRecord(choice) && isRecord(choice.message) ? choice.message : undefined;
+  const text = message ? textFromContent(message.content) : undefined;
+  if (text === undefined) throw new Error("invalid-transcription");
+  const annotations = syncAnnotations(message?.annotations);
+  return {
+    text,
+    ...(annotations.language === undefined ? {} : { language: annotations.language }),
+    ...(annotations.expression === undefined ? {} : { expression: annotations.expression })
+  };
 }
 
 function requestFromPayload(payload: unknown): KeposTtsSynthesisRequest {
@@ -470,6 +656,93 @@ async function providerBytes(
     : alibabaBytes(fetchImpl, credential, text, profile.voice);
 }
 
+const ASR_DIAGNOSTIC_PROFILE = { provider: "alibaba" as const, voice: QWEN_ASR_MODEL };
+
+function asrDiagnostic(
+  stage: NonNullable<TtsFailureDiagnostic["stage"]>,
+  detail: Pick<TtsFailureDiagnostic, "httpStatus" | "responseContentType" | "responseBytes" | "requestId" | "responseIssue"> = {}
+): Omit<TtsFailureDiagnostic, "category"> {
+  return providerDiagnostic(ASR_DIAGNOSTIC_PROFILE, stage, detail);
+}
+
+async function qwenAsrTranscription(
+  fetchImpl: typeof fetch,
+  credential: ResolvedCredential,
+  request: ParsedTranscriptionRequest,
+  signal?: AbortSignal
+): Promise<KeposTtsTranscription> {
+  if (signal?.aborted) throw new TtsGatewayError("cancelled");
+  const encoded = bytesToBase64(request.data);
+  const dataUrl = `data:${request.mediaType};base64,${encoded}`;
+  if (dataUrl.length > MAX_ASR_DATA_URL_BYTES) throw new TtsGatewayError("invalid-input");
+  const asrOptions = {
+    enable_itn: true,
+    ...(request.language === undefined ? {} : { language: request.language })
+  };
+  let response: Response;
+  try {
+    response = await fetchImpl(DASHSCOPE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credential.value}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: QWEN_ASR_MODEL,
+        input: {
+          messages: [{
+            role: "user",
+            content: [{ audio: dataUrl }]
+          }]
+        },
+        parameters: { asr_options: asrOptions },
+        stream: false
+      }),
+      ...(signal === undefined ? {} : { signal })
+    });
+  } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw new TtsGatewayError("cancelled");
+    }
+    throw new TtsGatewayError("provider-rejected", asrDiagnostic("network"));
+  }
+  if (signal?.aborted) throw new TtsGatewayError("cancelled");
+  if (!response.ok) throw await httpProviderRejection(response, ASR_DIAGNOSTIC_PROFILE);
+
+  let encodedResponse: Uint8Array;
+  let responseMeta: ReturnType<typeof responseDiagnostic> = responseDiagnostic(response);
+  try {
+    encodedResponse = await readBoundedResponse(response, MAX_PROVIDER_JSON_BYTES);
+    if (signal?.aborted) throw new TtsGatewayError("cancelled");
+    responseMeta = responseDiagnostic(response, encodedResponse.byteLength);
+  } catch (error) {
+    if (error instanceof TtsGatewayError) throw error;
+    if (signal?.aborted) throw new TtsGatewayError("cancelled");
+    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+      ...responseMeta,
+      responseIssue: "read-failed"
+    }));
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(encodedResponse));
+  } catch {
+    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+      ...responseMeta,
+      responseIssue: "invalid-json"
+    }));
+  }
+  try {
+    return normalizeQwenAsrResponse(body);
+  } catch {
+    throw new TtsGatewayError("provider-invalid-transcription", asrDiagnostic("provider-response", {
+      ...responseMeta,
+      responseIssue: "invalid-transcription"
+    }));
+  }
+}
+
 /** Shared in-flight work survives individual gateway instances and renderer disposal. */
 const inFlight = new Map<string, Promise<number>>();
 
@@ -557,23 +830,33 @@ export class TtsGateway {
     }
   }
 
+  /**
+   * Recognize one short voice attachment for a trusted Host consumer. The
+   * operation deliberately bypasses TTS provider selection: DashScope is the
+   * sole ASR provider and always uses the shared Alibaba credential.
+   */
+  async transcribe(payload: unknown, signal?: AbortSignal): Promise<KeposTtsTranscription> {
+    try {
+      if (signal?.aborted) throw new TtsGatewayError("cancelled");
+      const request = transcriptionRequestFromPayload(payload);
+      const workspace = resolveSessionWorkspace(this.options.sessions, request.sessionId);
+      if (!workspace) throw new TtsGatewayError("unavailable", asrDiagnostic("session"));
+      // Resolve this for every admitted call; credentials are intentionally not
+      // cached and the selected TTS provider never changes this reference.
+      const credential = await this.options.credentials.resolve(credentialRef(ALIBABA_CREDENTIAL_REF));
+      if (!credential?.value) throw new TtsGatewayError("unavailable", asrDiagnostic("credential"));
+      return await qwenAsrTranscription(this.fetchImpl, credential, request, signal);
+    } catch (error) {
+      throw reportGatewayFailure(error, this.options.onFailure);
+    }
+  }
+
   async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<ConnectionRpcResult<BrowserAudioPayload>> {
     if (endpoint !== RPC_ENDPOINT) return failure("invalid-input");
     try {
       return { ok: true, value: await this.synthesize(payload, signal) };
     } catch (error) {
-      const category = error instanceof TtsGatewayError ? error.category : "internal";
-      if (category !== "invalid-input" && category !== "cancelled") {
-        try {
-          this.options.onFailure?.({
-            category,
-            ...(error instanceof TtsGatewayError ? error.diagnostic : {})
-          });
-        } catch {
-          // Observability must not change the RPC result.
-        }
-      }
-      return failure(category);
+      return failure(reportGatewayFailure(error, this.options.onFailure).category);
     }
   }
 }
@@ -585,7 +868,8 @@ export function createTtsRpcHandler(gateway: TtsGateway): ConnectionRpcHandler {
 /** Build the optional Cordis Host service from the shared gateway. */
 export function createKeposTtsService(gateway: TtsGateway): KeposTtsService {
   return {
-    synthesize: (request, signal) => gateway.synthesizeBytes(request, signal)
+    synthesize: (request, signal) => gateway.synthesizeBytes(request, signal),
+    transcribe: (request, signal) => gateway.transcribe(request, signal)
   };
 }
 

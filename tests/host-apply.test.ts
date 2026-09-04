@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { apply, inject, name } from "../src/index.js";
 import { KEPOS_TTS_SERVICE, RPC_CHANNEL, RPC_ENDPOINT } from "../src/gateway.js";
 import { ALIBABA_CREDENTIAL_REF, DEFAULT_ALIBABA_VOICE, DEFAULT_BYTEDANCE_VOICE, DEFAULT_PROVIDER, SETTINGS_NAMESPACE, TTS_SYSTEM_PROMPT } from "../src/core.js";
+import { QWEN_ASR_MODEL } from "../src/constants.js";
 
 describe("host plugin composition", () => {
   it("registers native settings, static prompt, the sole RPC channel, and Cordis failure logging", async () => {
@@ -50,10 +51,15 @@ describe("host plugin composition", () => {
   it("publishes the Host service for its lifetime while preserving the browser RPC payload", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "kepos-tts-host-service-"));
     const handleCalls: unknown[][] = [];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
-      JSON.stringify({ output: { audio: { data: "SUQz" } } }),
-      { headers: { "content-type": "application/json" } }
-    ));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { model?: string };
+      return new Response(
+        JSON.stringify(body.model === QWEN_ASR_MODEL
+          ? { output: { choices: [{ message: { content: [{ text: "主机识别" }], annotations: [{ type: "audio_info", language: "zh", emotion: "neutral" }] } }] } }
+          : { output: { audio: { data: "SUQz" } } }),
+        { headers: { "content-type": "application/json" } }
+      );
+    });
     const ctx = new Context();
     ctx.provide("connection", { rpc: { handle: (channel: string, handler: unknown) => { handleCalls.push([channel, handler]); return async () => undefined; } } });
     ctx.provide("credentials", { resolve: async () => ({ value: "secret", source: "test" }) });
@@ -76,6 +82,9 @@ describe("host plugin composition", () => {
         }
       });
       expect(Object.keys((browserResult as { value: Record<string, unknown> }).value)).toEqual(["mediaType", "url", "bytes"]);
+      const service = ctx.get(KEPOS_TTS_SERVICE)!;
+      await expect(service.transcribe({ sessionId: "session-a", mediaType: "audio/mpeg", data: new Uint8Array([1, 2]) }))
+        .resolves.toEqual({ text: "主机识别", language: "zh", expression: "neutral" });
 
       await ctx.fiber.dispose();
       expect(ctx.get(KEPOS_TTS_SERVICE)).toBeUndefined();

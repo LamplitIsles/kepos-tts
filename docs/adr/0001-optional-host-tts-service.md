@@ -25,6 +25,19 @@ interface KeposTtsService {
     request: { sessionId: string; text: string },
     signal?: AbortSignal
   ): Promise<{ mediaType: "audio/mpeg"; data: Uint8Array }>;
+  transcribe(
+    request: {
+      sessionId: string;
+      mediaType: string;
+      data: Uint8Array;
+      language?: string;
+    },
+    signal?: AbortSignal
+  ): Promise<{
+    text: string;
+    language?: string;
+    expression?: string;
+  }>;
 }
 ```
 
@@ -35,6 +48,14 @@ Kepos. It returns bytes only: consumers do not receive a browser URL or cache
 path. Typed gateway failure categories remain the failure vocabulary, and no
 provider diagnostic is placed in the service value.
 
+The same optional service also exposes bounded, synchronous Qwen ASR for
+short non-real-time audio. It resolves the shared DashScope credential on each
+call, uses the fixed `qwen3-asr-flash` model, propagates cancellation, and
+returns provider-neutral text plus the model's optional audio-level language
+and speech-expression annotations. The synchronous response has no sentence
+timestamps; provider-owned confidence and raw response fields are not part of
+the contract.
+
 The service is optional and is removed with the plugin lifecycle. Consumers
 must read it with `ctx.get("keposTts")` and handle `undefined`; Kepos does not
 inject consumers. The authenticated browser RPC and same-origin artifact route
@@ -43,7 +64,9 @@ remain unchanged for browser tagged-TTS behavior.
 ## Consequences
 
 Host consumers can upload or otherwise process one bounded MP3 without knowing
-about Web transport or cache layout. Deployments without Kepos TTS expose no
-service, while mounted deployments retain one provider and cache owner. This
-is an in-process Host seam, not a public synthesis endpoint or a streaming
-audio API.
+about Web transport or cache layout. Host consumers can likewise submit one
+bounded audio clip for Qwen recognition without knowing DashScope request
+details. The encoded Data URL is bounded to 10 MB, while DashScope enforces the
+five-minute duration limit. Deployments without Kepos TTS expose no service,
+while mounted deployments retain one provider and cache owner. This is an
+in-process Host seam, not a public synthesis endpoint or a streaming audio API.
