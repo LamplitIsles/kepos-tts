@@ -40,6 +40,28 @@ kHz. The host accepts only the finalized passage and framework session identity
 sent by the browser's trusted Connection RPC; provider and voice are never
 message overrides.
 
+## Optional Host service
+
+When this plugin is mounted, it publishes the optional Cordis service
+`ctx.get("keposTts")`. A Host plugin can call the exported
+`KeposTtsService` contract:
+
+```ts
+const tts = ctx.get("keposTts");
+if (tts) {
+  const audio = await tts.synthesize({ sessionId, text }, signal);
+  // audio.mediaType === "audio/mpeg"; audio.data is bounded MP3 bytes
+}
+```
+
+The service validates the live session and text, resolves the configured
+provider and credential, and shares the workspace cache with browser TTS. It
+returns only `{ mediaType: "audio/mpeg", data: Uint8Array }`; it never returns
+a browser URL or cache path. The service is optional and disappears with the
+Kepos plugin fiber. This is an in-process Host seam for non-browser consumers,
+not a public HTTP synthesis route and not a replacement for the authenticated
+browser RPC.
+
 ## Audio cache
 
 Each prepared passage is keyed by its normalized text, selected provider

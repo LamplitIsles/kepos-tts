@@ -52,6 +52,33 @@ export interface TtsFailureDiagnostic {
   responseIssue?: "read-failed" | "invalid-json" | "invalid-frame" | "no-data-frames";
 }
 
+/** Stable input accepted by the optional Host-facing `keposTts` service. */
+export interface KeposTtsSynthesisRequest {
+  sessionId: string;
+  text: string;
+}
+
+/** Bounded MP3 payload returned by the optional Host-facing `keposTts` service. */
+export interface KeposTtsAudio {
+  mediaType: "audio/mpeg";
+  data: Uint8Array;
+}
+
+/** Optional in-process Host capability offered while the Kepos plugin is mounted. */
+export interface KeposTtsService {
+  synthesize(request: KeposTtsSynthesisRequest, signal?: AbortSignal): Promise<KeposTtsAudio>;
+}
+
+/** Cordis key for the optional Host TTS capability. */
+export const KEPOS_TTS_SERVICE = "keposTts" as const;
+
+declare module "@deepseek-ai/cordis" {
+  interface Context {
+    /** Optional Host TTS capability supplied by Kepos TTS when mounted. */
+    keposTts: KeposTtsService;
+  }
+}
+
 export { RPC_CHANNEL, RPC_ENDPOINT } from "./rpc.js";
 export type { BrowserAudioPayload } from "./rpc.js";
 export {
@@ -213,10 +240,7 @@ function base64ToBytes(value: string): Uint8Array | undefined {
   }
 }
 
-interface SynthesisRequest {
-  text: string;
-  sessionId: string;
-}
+interface SynthesisRequest extends KeposTtsSynthesisRequest {}
 
 function requestFromPayload(payload: unknown): SynthesisRequest {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -489,7 +513,12 @@ export class TtsGateway {
     return generation;
   }
 
-  async synthesize(payload: unknown, signal?: AbortSignal): Promise<BrowserAudioPayload> {
+  private async resolveArtifact(payload: unknown, signal?: AbortSignal): Promise<{
+    request: SynthesisRequest;
+    digest: string;
+    path: string;
+    size: number;
+  }> {
     if (signal?.aborted) throw new TtsGatewayError("cancelled");
     const request = requestFromPayload(payload);
     const settings = this.options.getSettings();
@@ -498,14 +527,36 @@ export class TtsGateway {
     if (!workspace) throw new TtsGatewayError("unavailable", providerDiagnostic(profile, "session"));
     const digest = cacheDigest(request.text, settings, CACHE_FORMAT_VERSION);
     const path = audioArtifactPath(workspace, digest);
-    // The provider request intentionally does not receive the browser signal:
+    // The provider request intentionally does not receive the caller signal:
     // once admitted, generation must finish so another occurrence can reuse it.
-    const bytes = await this.artifact(path, request.text, profile);
+    const size = await this.artifact(path, request.text, profile);
+    return { request, digest, path, size };
+  }
+
+  async synthesize(payload: unknown, signal?: AbortSignal): Promise<BrowserAudioPayload> {
+    const { request, digest, size } = await this.resolveArtifact(payload, signal);
     return {
       mediaType: "audio/mpeg",
       url: audioUrl(request.sessionId, digest),
-      bytes
+      bytes: size
     };
+  }
+
+  /**
+   * Synthesize one bounded MP3 for an in-process Host consumer. The returned
+   * value deliberately contains bytes only; browser URLs and cache paths stay
+   * behind the Kepos-owned browser and filesystem seams.
+   */
+  async synthesizeBytes(payload: unknown, signal?: AbortSignal): Promise<KeposTtsAudio> {
+    try {
+      const { path } = await this.resolveArtifact(payload, signal);
+      const data = await readAudioArtifact(path, MAX_AUDIO_BYTES);
+      if (!data) throw new TtsGatewayError("internal");
+      return { mediaType: "audio/mpeg", data };
+    } catch (error) {
+      if (error instanceof TtsGatewayError) throw error;
+      throw new TtsGatewayError("internal");
+    }
   }
 
   async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<ConnectionRpcResult<BrowserAudioPayload>> {
@@ -531,6 +582,13 @@ export class TtsGateway {
 
 export function createTtsRpcHandler(gateway: TtsGateway): ConnectionRpcHandler {
   return (endpoint, payload, signal) => gateway.handle(endpoint, payload, signal);
+}
+
+/** Build the optional Cordis Host service from the shared gateway. */
+export function createKeposTtsService(gateway: TtsGateway): KeposTtsService {
+  return {
+    synthesize: (request, signal) => gateway.synthesizeBytes(request, signal)
+  };
 }
 
 export function registerTtsRpc(

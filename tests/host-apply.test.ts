@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { Context } from "@deepseek-ai/cordis";
 
 import { apply, inject, name } from "../src/index.js";
-import { RPC_CHANNEL, RPC_ENDPOINT } from "../src/gateway.js";
+import { KEPOS_TTS_SERVICE, RPC_CHANNEL, RPC_ENDPOINT } from "../src/gateway.js";
 import { ALIBABA_CREDENTIAL_REF, DEFAULT_ALIBABA_VOICE, DEFAULT_BYTEDANCE_VOICE, DEFAULT_PROVIDER, SETTINGS_NAMESPACE, TTS_SYSTEM_PROMPT } from "../src/core.js";
 
 describe("host plugin composition", () => {
@@ -10,11 +11,13 @@ describe("host plugin composition", () => {
     const sectionCalls: unknown[] = [];
     const registerCalls: unknown[][] = [];
     const routeCalls: unknown[] = [];
+    const provideCalls: unknown[][] = [];
     const hostError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const handle = (...args: unknown[]) => { handleCalls.push(args); return async () => undefined; };
     const section = (value: unknown) => { sectionCalls.push(value); return () => undefined; };
     const register = (...args: unknown[]) => { registerCalls.push(args); return { get: () => ({ provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }) }; };
     const webServer = { register: (route: unknown) => { routeCalls.push(route); return () => undefined; } };
+    const provide = (...args: unknown[]) => { provideCalls.push(args); return () => undefined; };
     const effect = (callback: () => (() => void)) => callback();
     apply({
       settings: { register },
@@ -23,6 +26,7 @@ describe("host plugin composition", () => {
       systemPrompt: { section },
       sessions: { get: () => undefined },
       webServer,
+      provide,
       effect
     } as never);
     expect(name).toBe("kepos-tts");
@@ -30,6 +34,7 @@ describe("host plugin composition", () => {
     expect(registerCalls[0]).toEqual([SETTINGS_NAMESPACE, expect.anything(), { base: { provider: DEFAULT_PROVIDER, alibabaVoice: DEFAULT_ALIBABA_VOICE, bytedanceVoice: DEFAULT_BYTEDANCE_VOICE }, applies: "live" }]);
     expect(sectionCalls[0]).toEqual(expect.objectContaining({ name: "kepos-tts:tagged-output", text: TTS_SYSTEM_PROMPT }));
     expect(handleCalls[0]).toEqual([RPC_CHANNEL, expect.any(Function)]);
+    expect(provideCalls[0]).toEqual([KEPOS_TTS_SERVICE, expect.objectContaining({ synthesize: expect.any(Function) })]);
     expect(routeCalls[0]).toEqual(expect.objectContaining({ kind: "prefix", path: "/kepos-tts/audio", handler: expect.any(Function) }));
     const handler = handleCalls[0]![1] as (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>;
     expect(RPC_ENDPOINT).toBe("synthesize");
@@ -37,5 +42,21 @@ describe("host plugin composition", () => {
     await expect(handler(RPC_ENDPOINT, { text: "你好", sessionId: "missing-session" }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { message: "unavailable" } });
     expect(hostError).toHaveBeenCalledWith("[kepos-tts] synthesis failed", expect.objectContaining({ category: "unavailable" }));
     hostError.mockRestore();
+  });
+
+  it("publishes the Host service only for the mounted Cordis lifetime", async () => {
+    const ctx = new Context();
+    ctx.provide("connection", { rpc: { handle: () => async () => undefined } });
+    ctx.provide("credentials", { resolve: async () => undefined });
+    ctx.provide("settings", { register: () => ({ get: () => ({}) }) });
+    ctx.provide("systemPrompt", { section: () => () => undefined });
+    ctx.provide("sessions", { get: () => undefined });
+    ctx.provide("webServer", { register: () => () => undefined });
+
+    apply(ctx as never);
+    expect(ctx.get(KEPOS_TTS_SERVICE)).toEqual(expect.objectContaining({ synthesize: expect.any(Function) }));
+
+    await ctx.fiber.dispose();
+    expect(ctx.get(KEPOS_TTS_SERVICE)).toBeUndefined();
   });
 });
