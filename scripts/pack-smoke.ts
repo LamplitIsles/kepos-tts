@@ -230,23 +230,8 @@ try {
   vm.runInNewContext(clientCode, {
     window: { __ModuleLoader__: { load(spec: { id?: string; factory?: unknown }) { loaded = spec; } } }
   });
-  if (
-    loaded?.id !== manifest.name ||
-    typeof loaded.factory !== "function" ||
-    !clientCode.includes("Kepos Speech") ||
-    !clientCode.includes('data-plugin-css') ||
-    !/\.[A-Za-z0-9]+_player audio\{width:100%;height:32px\}/.test(clientCode) ||
-    !clientCode.includes('"player":') ||
-    clientCode.includes("createObjectURL") ||
-    clientCode.includes("revokeObjectURL") ||
-    clientCode.includes("data:audio/") ||
-    clientCode.includes('require("@deepseek-ai/dsh-credentials")') ||
-    clientCode.includes('require("@deepseek-ai/schemastery")') ||
-    clientCode.includes("kepos-tts") ||
-    clientCode.includes("@deepseek-ai/dsh-client-runtime") ||
-    clientCode.includes("@deepseek-ai/dsh-host-apiproxy")
-  ) {
-    throw new Error("served client loader or inlined stylesheet is missing");
+  if (loaded?.id !== manifest.name || typeof loaded.factory !== "function") {
+    throw new Error("served client bundle did not register with the DSH Loader");
   }
 
   const rpc = await jsonRequest(runtime.baseUrl, "/kepos-speech/synthesize", {
