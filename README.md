@@ -75,21 +75,37 @@ there is no browsing, migration, eviction, or cache-management UI.
 
 The tag-only workflow in `.github/workflows/release.yml` verifies the exact
 package that it publishes. Before the first automated release, a maintainer
-must:
+must bootstrap a distinct prerelease version, then prepare the first stable
+version:
 
 1. Create or confirm the `@lamplitisles` npm scope and manually publish the
-   initial `@lamplitisles/kepos-speech` beta package so the package identity
-   exists (from a maintainer workstation, after building, run
-   `npm publish --access public --tag beta`).
-2. Configure npm Trusted Publishing for
+   initial `@lamplitisles/kepos-speech@0.1.0-beta.0` package so the package
+   identity exists. Set `package.json` to `0.1.0-beta.0`, run the bootstrap checks
+   below from a maintainer workstation, and publish with local npm
+   authentication:
+
+   ```sh
+   bun install --frozen-lockfile
+   bun run typecheck
+   bun run test
+   bun run build
+   GITHUB_REF_NAME=v0.1.0-beta.0 bun run release:check
+   npm publish --access public --tag beta
+   ```
+
+   This prerelease is deliberately distinct from the later stable `0.1.0`;
+   do not manually publish `0.1.0`.
+2. Change `package.json` to version `0.1.0` and commit that change, then
+   configure npm Trusted Publishing for
    `@lamplitisles/kepos-speech`, repository
    `LamplitIsles/kepos-speech`, workflow
    `.github/workflows/release.yml`, and the GitHub `npm` environment.
 3. Create the protected GitHub `npm` environment with the required approval
    policy.
 
-For each release, update `package.json` to the intended version, run the local
-checks, and create a semantic version tag:
+For the first stable trusted publish, rerun the checks with the stable version,
+push the committed version change, and create the tag with the supported `og`
+operation (`og tag --help` describes this as “Create and push a tag”):
 
 ```sh
 bun install --frozen-lockfile
@@ -97,18 +113,22 @@ bun run typecheck
 bun run test
 bun run build
 GITHUB_REF_NAME=v0.1.0 bun run release:check
-git tag v0.1.0
-git push origin v0.1.0
+og push
+og tag v0.1.0
 ```
 
-Tags must be `v<semver>` (for example `v0.1.0` or `v0.2.0-beta.1`). Stable
-tags publish to npm as `latest`; prerelease tags publish as `beta`. The verify
-job performs an immutable install, typecheck, tests, build, packed-artifact
-validation, and the disposable DSH package smoke check before uploading the
-tarball consumed by the publish job. Publishing uses npm OIDC provenance in the
-protected `npm` environment with `id-token: write`; no npm token or repository
-secret is configured or required for automated releases. The one-time manual
-publication uses the maintainer's local npm authentication only.
+For each subsequent release, update `package.json` to the intended version,
+run the local checks, push the committed change with `og push`, and create its
+semantic version tag with `og tag v<version>` (for example, `og tag
+v0.2.0-beta.1`). Tags must be `v<semver>` (for example `v0.1.0` or
+`v0.2.0-beta.1`). Stable tags publish to npm as `latest`; prerelease tags
+publish as `beta`. The verify job performs an immutable install, typecheck,
+tests, build, packed-artifact validation, and the disposable DSH package smoke
+check before uploading the tarball consumed by the publish job. Publishing uses
+npm OIDC provenance in the protected `npm` environment with `id-token: write`;
+no npm token or repository secret is configured or required for automated
+releases. The one-time bootstrap publication uses the maintainer's local npm
+authentication only.
 
 ## Development
 

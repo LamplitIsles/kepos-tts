@@ -6,7 +6,6 @@ export const PACKAGE_NAME = "@lamplitisles/kepos-speech";
 export const REPOSITORY_URL = "https://github.com/LamplitIsles/kepos-speech.git";
 
 export const PUBLIC_PACKAGE = {
-  directory: ".",
   name: PACKAGE_NAME,
   requiredFiles: [
     "dist/index.js",
@@ -19,14 +18,23 @@ export const PUBLIC_PACKAGE = {
   ]
 } as const;
 
-export const PUBLIC_PACKAGES = [PUBLIC_PACKAGE] as const;
-
-const tagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const numericIdentifier = "(?:0|[1-9]\\d*)";
+const prereleaseIdentifier = "[0-9A-Za-z-]+";
+const buildIdentifier = "[0-9A-Za-z-]+";
+const tagPattern = new RegExp(
+  `^v${numericIdentifier}\\.${numericIdentifier}\\.${numericIdentifier}`
+    + `(?:-(${prereleaseIdentifier}(?:\\.${prereleaseIdentifier})*))?`
+    + `(?:\\+${buildIdentifier}(?:\\.${buildIdentifier})*)?$`,
+  "u"
+);
 
 /** Return the exact package version represented by a release tag. */
 export function versionFromTag(tag: string): string {
   const match = tagPattern.exec(tag);
-  if (!match) {
+  // A numeric prerelease identifier may be exactly `0`, but not a longer
+  // identifier with a leading zero. Mixed identifiers such as `alpha.01`
+  // remain valid prerelease labels.
+  if (!match || /^0\d+$/.test(match[1]?.split(".", 1)[0] ?? "")) {
     throw new Error("Release tags must use v<semver>, for example v0.1.0 or v0.1.0-beta.1.");
   }
   return tag.slice(1);
